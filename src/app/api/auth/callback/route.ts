@@ -11,5 +11,7 @@ export async function GET(request: NextRequest) {
   }
   
   // URL to redirect to after sign in process completes
-  return NextResponse.redirect(requestUrl.origin)
+  // Use NEXT_PUBLIC_SITE_URL if available, otherwise fall back to request origin
+  const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL || requestUrl.origin
+  return NextResponse.redirect(redirectUrl)
 }

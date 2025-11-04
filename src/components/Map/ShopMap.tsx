@@ -370,19 +370,13 @@ export default function ShopMap({
             icon={getShopIcon(shop)}
             eventHandlers={{
               click: () => {
-                const isOsmShop = shop.source === 'osm'
-                console.log('[ShopMap] Shop clicked:', {
+                console.log('[ShopMap] Marker clicked:', {
                   id: shop.id,
                   name: shop.name,
-                  source: shop.source,
-                  isOSM: isOsmShop,
-                  willTriggerNavigation: !isOsmShop
+                  source: shop.source
                 })
-                // Only trigger onShopClick for user shops (which navigates to detail page)
-                // OSM shops show all info in the popup, so no navigation needed
-                if (!isOsmShop) {
-                  onShopClick?.(shop)
-                }
+                // Popup will open automatically - no navigation on marker click
+                // Navigation happens via "View Details" button in popup for user shops
               }
             }}
           >

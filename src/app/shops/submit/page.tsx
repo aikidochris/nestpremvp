@@ -23,6 +23,7 @@ export default function SubmitShopPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([])
+  const [nameSuggestions, setNameSuggestions] = useState<any[]>([])
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -70,9 +71,6 @@ export default function SubmitShopPage() {
         address,
         latitude: suggestion.position.lat,
         longitude: suggestion.position.lng,
-        // Pre-fill additional fields if available from metadata
-        phone: suggestion.metadata?.phone || formData.phone,
-        website: suggestion.metadata?.website || formData.website,
       })
       setAddressSuggestions([])
       return
@@ -103,6 +101,54 @@ export default function SubmitShopPage() {
       console.error('Geocoding error:', error)
       alert('Failed to geocode address. Please try another address.')
     }
+  }
+
+  const handleNameSearch = async (query: string) => {
+    if (query.length < 2) {
+      setNameSuggestions([])
+      return
+    }
+
+    // Only search if we have a location
+    if (!formData.latitude || !formData.longitude) {
+      return
+    }
+
+    try {
+      // Search for businesses near the selected location
+      const searchQuery = `${query} coffee near ${formData.address}`
+      const response = await fetch(`/api/geocode?q=${encodeURIComponent(searchQuery)}&type=autosuggest`)
+      const { data, error } = await response.json()
+      
+      if (error) {
+        console.error('Name search error:', error)
+        setNameSuggestions([])
+        return
+      }
+      
+      if (data?.items) {
+        // Filter to only show results that match the name query
+        const filtered = data.items.filter((item: any) =>
+          item.title?.toLowerCase().includes(query.toLowerCase())
+        )
+        setNameSuggestions(filtered)
+      }
+    } catch (error) {
+      console.error('Name search error:', error)
+      setNameSuggestions([])
+    }
+  }
+
+  const handleNameSelect = (suggestion: any) => {
+    setFormData({
+      ...formData,
+      name: suggestion.title,
+      // Auto-fill additional fields from metadata if available
+      phone: suggestion.metadata?.phone || formData.phone,
+      website: suggestion.metadata?.website || formData.website,
+      description: suggestion.metadata?.type || formData.description,
+    })
+    setNameSuggestions([])
   }
 
   const handleCryptoToggle = (cryptoId: string) => {
@@ -182,25 +228,10 @@ export default function SubmitShopPage() {
         {/* Form Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 border-4 border-orange-200">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Shop Name */}
-            <div>
-              <label className="block text-sm font-bold text-gray-900 mb-2">
-                ☕ Shop Name *
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-orange-200 focus:border-orange-500 transition-all outline-none text-gray-900"
-                placeholder="e.g., Bitcoin Coffee House"
-              />
-            </div>
-
-            {/* Address */}
+            {/* Address - Now First */}
             <div className="relative">
               <label className="block text-sm font-bold text-gray-900 mb-2">
-                📍 Address *
+                📍 Address * <span className="text-xs font-normal text-gray-600">(Start here)</span>
               </label>
               <input
                 type="text"
@@ -228,6 +259,56 @@ export default function SubmitShopPage() {
                       {suggestion.metadata?.rating && (
                         <div className="text-xs text-orange-600 mt-1">
                           ⭐ {suggestion.metadata.rating} {suggestion.metadata.reviews && `(${suggestion.metadata.reviews} reviews)`}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Shop Name - Now Second with Autocomplete */}
+            <div className="relative">
+              <label className="block text-sm font-bold text-gray-900 mb-2">
+                ☕ Shop Name *
+                {formData.latitude === 0 && (
+                  <span className="ml-2 text-xs font-normal text-orange-600">
+                    (Select address first for autocomplete)
+                  </span>
+                )}
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.name}
+                onChange={(e) => {
+                  setFormData({ ...formData, name: e.target.value })
+                  handleNameSearch(e.target.value)
+                }}
+                disabled={formData.latitude === 0}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-orange-200 focus:border-orange-500 transition-all outline-none text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                placeholder={formData.latitude === 0 ? "Select address first..." : "Start typing shop name..."}
+              />
+              
+              {nameSuggestions.length > 0 && (
+                <div className="absolute z-10 w-full mt-2 bg-white border-2 border-gray-300 rounded-xl shadow-2xl max-h-60 overflow-y-auto">
+                  {nameSuggestions.map((suggestion, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => handleNameSelect(suggestion)}
+                      className="w-full px-4 py-3 text-left hover:bg-orange-50 border-b border-gray-200 last:border-b-0 transition-colors"
+                    >
+                      <div className="font-bold text-gray-900">{suggestion.title}</div>
+                      <div className="text-sm text-gray-600">{suggestion.address?.label}</div>
+                      {suggestion.metadata?.rating && (
+                        <div className="text-xs text-orange-600 mt-1">
+                          ⭐ {suggestion.metadata.rating} {suggestion.metadata.reviews && `(${suggestion.metadata.reviews} reviews)`}
+                        </div>
+                      )}
+                      {suggestion.metadata?.type && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {suggestion.metadata.type}
                         </div>
                       )}
                     </button>

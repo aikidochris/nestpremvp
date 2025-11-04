@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import ShopMap from '@/components/Map/MapWrapper'
 
 interface Shop {
@@ -13,16 +14,28 @@ interface Shop {
   crypto_accepted: string[]
 }
 
-interface HomeClientProps {
-  shops: Shop[]
+interface User {
+  id: string
+  email?: string
 }
 
-export default function HomeClient({ shops }: HomeClientProps) {
+interface HomeClientProps {
+  shops: Shop[]
+  user: User | null
+}
+
+export default function HomeClient({ shops, user }: HomeClientProps) {
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
+  const supabase = createClient()
 
   const handleShopClick = (shop: Shop) => {
     router.push(`/shops/${shop.id}`)
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.refresh()
   }
 
   return (
@@ -40,19 +53,35 @@ export default function HomeClient({ shops }: HomeClientProps) {
                 <p className="text-gray-600 font-semibold">Find Bitcoin-Friendly Coffee Shops</p>
               </div>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-center">
               <a
                 href="/shops/submit"
                 className="px-6 py-3 bg-orange-600 text-white rounded-lg font-bold hover:bg-orange-700 transition-all hover:scale-105 shadow-lg"
               >
                 ➕ Add Shop
               </a>
-              <a
-                href="/auth/login"
-                className="px-6 py-3 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 transition-all hover:scale-105 shadow-lg"
-              >
-                Login
-              </a>
+              {user ? (
+                <div className="flex items-center gap-3">
+                  <div className="px-4 py-2 bg-green-100 border-2 border-green-500 rounded-lg">
+                    <span className="text-green-700 font-bold text-sm">
+                      ✓ {user.email}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="px-6 py-3 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 transition-all hover:scale-105 shadow-lg"
+                  >
+                    Logout
+                  </button>
+                </div>
+              ) : (
+                <a
+                  href="/auth/login"
+                  className="px-6 py-3 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 transition-all hover:scale-105 shadow-lg"
+                >
+                  Login
+                </a>
+              )}
             </div>
           </div>
           

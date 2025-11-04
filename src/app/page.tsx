@@ -11,5 +11,8 @@ export default async function Home() {
     .eq('approved', true)
     .order('created_at', { ascending: false })
   
-  return <HomeClient shops={shops || []} />
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  return <HomeClient shops={shops || []} user={user} />
 }

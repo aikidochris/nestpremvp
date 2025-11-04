@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import HomeClient from './HomeClient'
+import type { Database } from '@/types/database'
 
 export default async function Home() {
   const supabase = await createClient()
@@ -19,9 +20,9 @@ export default async function Home() {
   if (user) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('is_admin')
+      .select('*')
       .eq('id', user.id)
-      .single()
+      .single<Database['public']['Tables']['profiles']['Row']>()
     
     isAdmin = profile?.is_admin || false
   }

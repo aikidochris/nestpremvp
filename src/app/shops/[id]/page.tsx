@@ -9,10 +9,10 @@ interface PageProps {
 
 export default async function ShopDetailPage({ params }: PageProps) {
   const { id } = await params
-  const supabase = createClient()
+  const supabase = await createClient()
   
   // Fetch shop details
-  const { data: shop, error } = await supabase
+  const { data: shop, error } = await (supabase as any)
     .from('shops')
     .select(`
       *,
@@ -30,7 +30,7 @@ export default async function ShopDetailPage({ params }: PageProps) {
   }
   
   // Get vote counts
-  const { data: voteData } = await supabase
+  const { data: voteData } = await (supabase as any)
     .rpc('calculate_shop_score', { shop_uuid: id })
   
   const votes = voteData?.[0] || { 

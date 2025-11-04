@@ -14,10 +14,6 @@ const nextConfig = {
     // Disable image optimization cache
     unoptimized: process.env.DISABLE_CACHE === 'true',
   },
-  // Disable static page generation cache
-  experimental: {
-    isrMemoryCacheSize: 0, // Disable ISR cache
-  },
 };
 
 module.exports = withPWA({

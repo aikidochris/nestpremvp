@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
     if (!user) {
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Check if user is admin
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabase as any)
       .from('profiles')
       .select('is_admin')
       .eq('id', user.id)
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     
     if (action === 'approve') {
       // Get submission data
-      const { data: submission, error: fetchError } = await supabase
+      const { data: submission, error: fetchError } = await (supabase as any)
         .from('submissions')
         .select('*')
         .eq('id', submissionId)
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Create shop from submission
-      const { data: shop, error: shopError } = await supabase
+      const { data: shop, error: shopError } = await (supabase as any)
         .from('shops')
         .insert({
           name: submission.name,
@@ -60,13 +60,13 @@ export async function POST(request: NextRequest) {
       }
       
       // Copy images from submission to shop
-      const { data: submissionImages } = await supabase
+      const { data: submissionImages } = await (supabase as any)
         .from('submission_images')
         .select('*')
         .eq('submission_id', submissionId)
       
       if (submissionImages && submissionImages.length > 0) {
-        const shopImages = submissionImages.map((img, index) => ({
+        const shopImages = submissionImages.map((img: any, index: number) => ({
           shop_id: shop.id,
           image_url: img.image_url,
           thumbnail_url: img.image_url, // TODO: Generate actual thumbnail
@@ -74,11 +74,11 @@ export async function POST(request: NextRequest) {
           uploaded_by: submission.submitted_by
         }))
         
-        await supabase.from('shop_images').insert(shopImages)
+        await (supabase as any).from('shop_images').insert(shopImages)
       }
       
       // Update submission status
-      const { error: updateError } = await supabase
+      const { error: updateError } = await (supabase as any)
         .from('submissions')
         .update({
           status: 'approved',
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ data: shop })
     } else if (action === 'reject') {
       // Update submission status to rejected
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('submissions')
         .update({
           status: 'rejected',

@@ -3,11 +3,11 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
     // Check if user is admin
-    const { data: profile } = user ? await supabase
+    const { data: profile } = user ? await (supabase as any)
       .from('profiles')
       .select('is_admin')
       .eq('id', user.id)
@@ -44,12 +44,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
     const body = await request.json()
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('submissions')
       .insert({
         ...body,

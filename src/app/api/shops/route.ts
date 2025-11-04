@@ -9,11 +9,11 @@ export async function GET(request: NextRequest) {
     const radius = searchParams.get('radius') || '10'
     const crypto = searchParams.get('crypto')
     
-    const supabase = createClient()
+    const supabase = await createClient()
     
     // If lat/lng provided, get nearby shops
     if (lat && lng) {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .rpc('get_nearby_shops', {
           lat: parseFloat(lat),
           lng: parseFloat(lng),
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
     // Check if user is admin
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabase as any)
       .from('profiles')
       .select('is_admin')
       .eq('id', user.id)
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     
     const body = await request.json()
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('shops')
       .insert({
         ...body,

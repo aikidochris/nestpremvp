@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
 export default async function AdminDashboard() {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   // Check authentication
   const { data: { user } } = await supabase.auth.getUser()
@@ -18,7 +18,7 @@ export default async function AdminDashboard() {
     .eq('id', user.id)
     .single()
   
-  if (!profile?.is_admin) {
+  if (!(profile as any)?.is_admin) {
     redirect('/')
   }
   

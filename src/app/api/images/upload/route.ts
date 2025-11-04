@@ -6,7 +6,7 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
+    const supabase = await createClient()
     const formData = await request.formData()
     const file = formData.get('file') as File
     const submissionId = formData.get('submission_id') as string
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     const filePath = `${submissionId || shopId}/${fileName}`
     
     // Upload to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabase
+    const { data: uploadData, error: uploadError } = await (supabase as any)
       .storage
       .from('shop-images')
       .upload(filePath, file, {
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     
     // Save image record to database
     if (submissionId) {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('submission_images')
         .insert({
           submission_id: submissionId,
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     } else if (shopId) {
       const { data: { user } } = await supabase.auth.getUser()
       
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('shop_images')
         .insert({
           shop_id: shopId,

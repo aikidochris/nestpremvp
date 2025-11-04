@@ -7,9 +7,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const supabase = createClient()
+    const supabase = await createClient()
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('shops')
       .select(`
         *,
@@ -27,7 +27,7 @@ export async function GET(
     }
     
     // Get vote counts
-    const { data: voteData } = await supabase
+    const { data: voteData } = await (supabase as any)
       .rpc('calculate_shop_score', { shop_uuid: id })
     
     return NextResponse.json({ 
@@ -50,7 +50,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
     if (!user) {
@@ -58,7 +58,7 @@ export async function PATCH(
     }
     
     // Check if user is admin
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabase as any)
       .from('profiles')
       .select('is_admin')
       .eq('id', user.id)
@@ -70,7 +70,7 @@ export async function PATCH(
     
     const body = await request.json()
     
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('shops')
       .update(body)
       .eq('id', id)
@@ -96,7 +96,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
     if (!user) {
@@ -104,7 +104,7 @@ export async function DELETE(
     }
     
     // Check if user is admin
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabase as any)
       .from('profiles')
       .select('is_admin')
       .eq('id', user.id)
@@ -114,7 +114,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('shops')
       .delete()
       .eq('id', id)

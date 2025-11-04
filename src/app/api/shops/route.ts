@@ -8,8 +8,9 @@ export async function GET(request: NextRequest) {
     const lng = searchParams.get('lng')
     const radius = searchParams.get('radius') || '10'
     const crypto = searchParams.get('crypto')
+    const count = searchParams.get('count') === 'true'
     
-    console.log('[/api/shops] GET request params:', { lat, lng, radius, crypto })
+    console.log('[/api/shops] GET request params:', { lat, lng, radius, crypto, count })
     
     const supabase = await createClient()
     
@@ -20,6 +21,27 @@ export async function GET(request: NextRequest) {
         lng: parseFloat(lng),
         radius_km: parseFloat(radius)
       })
+      
+      // DIAGNOSTIC: First, let's check what's in the shops table directly
+      const { data: directShops, error: directError } = await supabase
+        .from('shops')
+        .select('id, name, latitude, longitude, approved')
+        .eq('approved', true)
+      
+      console.log('[/api/shops] DIAGNOSTIC - Direct table query results:', {
+        count: directShops?.length || 0,
+        shops: directShops?.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          lat: s.latitude,
+          lng: s.longitude,
+          approved: s.approved
+        }))
+      })
+      
+      if (directError) {
+        console.error('[/api/shops] DIAGNOSTIC - Direct query error:', directError)
+      }
       
       const { data, error } = await (supabase as any)
         .rpc('get_nearby_shops', {
@@ -50,6 +72,9 @@ export async function GET(request: NextRequest) {
           distance_km: s.distance_km,
           approved: s.approved
         })))
+      } else {
+        console.log('[/api/shops] DIAGNOSTIC - RPC returned empty but direct query found', directShops?.length || 0, 'shops')
+        console.log('[/api/shops] DIAGNOSTIC - This suggests RLS or distance calculation issue')
       }
       
       return NextResponse.json({ data })
@@ -58,19 +83,27 @@ export async function GET(request: NextRequest) {
     // Otherwise get all approved shops
     let query = supabase
       .from('shops')
-      .select('*')
+      .select(count ? '*' : '*', { count: count ? 'exact' : undefined })
       .eq('approved', true)
-      .order('created_at', { ascending: false })
+    
+    if (!count) {
+      query = query.order('created_at', { ascending: false })
+    }
     
     // Filter by crypto type if provided
     if (crypto) {
       query = query.contains('crypto_accepted', [crypto])
     }
     
-    const { data, error } = await query
+    const { data, error, count: totalCount } = await query
     
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    
+    // If count requested, return just the count
+    if (count) {
+      return NextResponse.json({ count: totalCount })
     }
     
     return NextResponse.json({ data })

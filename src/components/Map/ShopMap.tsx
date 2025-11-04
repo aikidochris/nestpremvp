@@ -295,6 +295,7 @@ export default function ShopMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <MapUpdater center={center} />
+        <MapEventHandler onMapMove={handleMapMove} />
         
         {visibleShops.map((shop) => (
           <Marker

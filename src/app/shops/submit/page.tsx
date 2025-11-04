@@ -86,7 +86,20 @@ export default function SubmitShopPage() {
     }
 
     try {
-      const response = await fetch(`/api/business-search?q=${encodeURIComponent(query)}`)
+      // Build URL with location parameters if available
+      const url = new URL('/api/business-search', window.location.origin)
+      url.searchParams.set('q', query)
+      
+      // Add location context if coordinates are available
+      if (formData.latitude !== 0 && formData.longitude !== 0) {
+        url.searchParams.set('lat', formData.latitude.toString())
+        url.searchParams.set('lng', formData.longitude.toString())
+      } else if (formData.address) {
+        // Fallback to address string if coordinates not yet available
+        url.searchParams.set('location', formData.address)
+      }
+      
+      const response = await fetch(url.toString())
       const { data, error } = await response.json()
       
       if (error) {

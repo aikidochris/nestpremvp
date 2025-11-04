@@ -36,8 +36,9 @@ export default function SubmitShopPage() {
     hours: {},
   })
   
-  // Debounce timer for address search
+  // Debounce timers for independent autocomplete fields
   const addressDebounceTimer = useRef<NodeJS.Timeout | null>(null)
+  const nameDebounceTimer = useRef<NodeJS.Timeout | null>(null)
 
   const handleAddressSearch = async (query: string) => {
     if (query.length < 3) {
@@ -77,11 +78,53 @@ export default function SubmitShopPage() {
     }, 600) // 600ms debounce delay
   }
   
-  // Cleanup debounce timer on unmount
+  // Business name search handler
+  const handleNameSearch = async (query: string) => {
+    if (query.length < 2) {
+      setNameSuggestions([])
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/business-search?q=${encodeURIComponent(query)}`)
+      const { data, error } = await response.json()
+      
+      if (error) {
+        console.error('Name search error:', error)
+        setNameSuggestions([])
+        return
+      }
+      
+      if (data && Array.isArray(data)) {
+        setNameSuggestions(data)
+      }
+    } catch (error) {
+      console.error('Name search error:', error)
+      setNameSuggestions([])
+    }
+  }
+  
+  // Debounced name search function
+  const debouncedNameSearch = (query: string) => {
+    // Clear existing timer
+    if (nameDebounceTimer.current) {
+      clearTimeout(nameDebounceTimer.current)
+    }
+    
+    // Set new timer
+    nameDebounceTimer.current = setTimeout(() => {
+      handleNameSearch(query)
+    }, 600) // 600ms debounce delay
+  }
+  
+  // Cleanup debounce timers on unmount
   useEffect(() => {
     return () => {
       if (addressDebounceTimer.current) {
         clearTimeout(addressDebounceTimer.current)
+      }
+      if (nameDebounceTimer.current) {
+        clearTimeout(nameDebounceTimer.current)
       }
     }
   }, [])
@@ -246,7 +289,7 @@ export default function SubmitShopPage() {
             </div>
 
             {/* Shop Name */}
-            <div>
+            <div className="relative">
               <label className="block text-sm font-bold text-gray-900 mb-2">
                 ☕ Shop Name *
               </label>
@@ -256,10 +299,42 @@ export default function SubmitShopPage() {
                 value={formData.name}
                 onChange={(e) => {
                   setFormData({ ...formData, name: e.target.value })
+                  debouncedNameSearch(e.target.value)
                 }}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-orange-200 focus:border-orange-500 transition-all outline-none text-gray-900"
-                placeholder="Enter the coffee shop name..."
+                placeholder="Start typing a business name..."
               />
+              
+              {nameSuggestions.length > 0 && (
+                <div className="absolute z-10 w-full mt-2 bg-white border-2 border-gray-300 rounded-xl shadow-2xl max-h-60 overflow-y-auto">
+                  {nameSuggestions.map((suggestion, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => {
+                        setFormData({ ...formData, name: suggestion.name })
+                        setNameSuggestions([])
+                      }}
+                      className="w-full px-4 py-3 text-left hover:bg-orange-50 border-b border-gray-200 last:border-b-0 transition-colors"
+                    >
+                      <div className="font-bold text-gray-900">{suggestion.name}</div>
+                      {suggestion.address && (
+                        <div className="text-sm text-gray-600">{suggestion.address}</div>
+                      )}
+                      {suggestion.rating && (
+                        <div className="text-xs text-orange-600 mt-1">
+                          ⭐ {suggestion.rating} {suggestion.reviews && `(${suggestion.reviews} reviews)`}
+                        </div>
+                      )}
+                      {suggestion.type && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {suggestion.type}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Map Preview */}

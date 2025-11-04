@@ -36,6 +36,17 @@ export async function POST(request: NextRequest) {
       }
       
       // Create shop from submission
+      console.log('[APPROVE] About to insert shop with data:', {
+        name: submission.name,
+        address: submission.address,
+        latitude: submission.latitude,
+        longitude: submission.longitude,
+        crypto_accepted: submission.crypto_accepted,
+        approved: true,
+        submitted_by: submission.submitted_by,
+        approved_by: user.id
+      })
+      
       const { data: shop, error: shopError } = await (supabase as any)
         .from('shops')
         .insert({
@@ -55,9 +66,24 @@ export async function POST(request: NextRequest) {
         .select()
         .single()
       
+      console.log('[APPROVE] Shop insert result:', { shop, shopError })
+      
       if (shopError) {
-        return NextResponse.json({ error: shopError.message }, { status: 500 })
+        console.error('[APPROVE] Failed to create shop:', shopError)
+        console.error('[APPROVE] Error details:', {
+          message: shopError.message,
+          details: shopError.details,
+          hint: shopError.hint,
+          code: shopError.code
+        })
+        return NextResponse.json({
+          error: shopError.message,
+          details: shopError.details,
+          hint: shopError.hint
+        }, { status: 500 })
       }
+      
+      console.log('[APPROVE] Successfully created shop:', shop.id)
       
       // Copy images from submission to shop
       const { data: submissionImages } = await (supabase as any)
@@ -148,8 +174,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
     }
   } catch (error) {
+    console.error('[APPROVE] Unexpected error in approval process:', error)
+    console.error('[APPROVE] Error stack:', error instanceof Error ? error.stack : 'No stack trace')
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : String(error)
+      },
       { status: 500 }
     )
   }

@@ -43,22 +43,51 @@ export default function SubmitShopPage() {
 
     try {
       const response = await fetch(`/api/geocode?q=${encodeURIComponent(query)}&type=autosuggest`)
-      const { data } = await response.json()
+      const { data, error } = await response.json()
+      
+      if (error) {
+        console.error('Address search error:', error)
+        setAddressSuggestions([])
+        return
+      }
       
       if (data?.items) {
         setAddressSuggestions(data.items)
       }
     } catch (error) {
       console.error('Address search error:', error)
+      setAddressSuggestions([])
     }
   }
 
   const handleAddressSelect = async (suggestion: any) => {
     const address = suggestion.address?.label || suggestion.title
     
+    // If suggestion already has position (from ValueSerp), use it directly
+    if (suggestion.position?.lat && suggestion.position?.lng) {
+      setFormData({
+        ...formData,
+        address,
+        latitude: suggestion.position.lat,
+        longitude: suggestion.position.lng,
+        // Pre-fill additional fields if available from metadata
+        phone: suggestion.metadata?.phone || formData.phone,
+        website: suggestion.metadata?.website || formData.website,
+      })
+      setAddressSuggestions([])
+      return
+    }
+    
+    // Otherwise, geocode the address
     try {
       const response = await fetch(`/api/geocode?q=${encodeURIComponent(address)}&type=geocode`)
-      const { data } = await response.json()
+      const { data, error } = await response.json()
+      
+      if (error) {
+        console.error('Geocoding error:', error)
+        alert('Failed to geocode address. Please try another address.')
+        return
+      }
       
       if (data?.items?.[0]?.position) {
         const { lat, lng } = data.items[0].position
@@ -72,6 +101,7 @@ export default function SubmitShopPage() {
       }
     } catch (error) {
       console.error('Geocoding error:', error)
+      alert('Failed to geocode address. Please try another address.')
     }
   }
 
@@ -195,6 +225,11 @@ export default function SubmitShopPage() {
                     >
                       <div className="font-bold text-gray-900">{suggestion.title}</div>
                       <div className="text-sm text-gray-600">{suggestion.address?.label}</div>
+                      {suggestion.metadata?.rating && (
+                        <div className="text-xs text-orange-600 mt-1">
+                          ⭐ {suggestion.metadata.rating} {suggestion.metadata.reviews && `(${suggestion.metadata.reviews} reviews)`}
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>

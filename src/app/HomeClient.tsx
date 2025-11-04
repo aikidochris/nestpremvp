@@ -60,45 +60,36 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
     return R * c
   }, [])
 
-  // Fetch user shops based on map location with dynamic radius
+  // Fetch user shops based on map bounding box
   const fetchUserShops = useCallback(async (center: [number, number], bounds?: L.LatLngBounds) => {
     try {
-      let radius = 10 // Default 10km radius
+      let url: string
       
-      // Calculate dynamic radius based on map bounds if available
+      // Use bounding box if available, otherwise fall back to center point
       if (bounds) {
         const sw = bounds.getSouthWest()
         const ne = bounds.getNorthEast()
         
-        // Calculate diagonal distance of visible area
-        const diagonalDistance = calculateDistance(
-          sw.lat,
-          sw.lng,
-          ne.lat,
-          ne.lng
-        )
+        url = `/api/shops?swLat=${sw.lat}&swLng=${sw.lng}&neLat=${ne.lat}&neLng=${ne.lng}`
         
-        // Use half the diagonal to cover the visible area
-        // Apply min/max constraints: 10km minimum, 1000km maximum
-        radius = Math.max(10, Math.min(1000, diagonalDistance / 2))
+        console.log('[HomeClient] Fetching shops with bounding box:', {
+          bounds: { sw: [sw.lat, sw.lng], ne: [ne.lat, ne.lng] }
+        })
+      } else {
+        // Fallback to center point with default radius for initial load
+        url = `/api/shops?lat=${center[0]}&lng=${center[1]}&radius=10`
         
-        console.log('[HomeClient] Dynamic radius calculated:', {
-          bounds: { sw: [sw.lat, sw.lng], ne: [ne.lat, ne.lng] },
-          diagonalDistance: diagonalDistance.toFixed(2),
-          calculatedRadius: radius.toFixed(2)
+        console.log('[HomeClient] Fetching shops with center point (no bounds yet):', {
+          center
         })
       }
       
-      const response = await fetch(
-        `/api/shops?lat=${center[0]}&lng=${center[1]}&radius=${radius}`
-      )
+      const response = await fetch(url)
       
       if (response.ok) {
         const { data } = await response.json()
         console.log('[HomeClient] Fetched shops:', {
           count: data?.length || 0,
-          center,
-          radius,
           shopIds: data?.map((s: Shop) => s.id) || []
         })
         setShops(data || [])

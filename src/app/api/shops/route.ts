@@ -7,14 +7,44 @@ export async function GET(request: NextRequest) {
     const lat = searchParams.get('lat')
     const lng = searchParams.get('lng')
     const radius = searchParams.get('radius') || '10'
+    const swLat = searchParams.get('swLat')
+    const swLng = searchParams.get('swLng')
+    const neLat = searchParams.get('neLat')
+    const neLng = searchParams.get('neLng')
     const crypto = searchParams.get('crypto')
     const count = searchParams.get('count') === 'true'
     
-    console.log('[/api/shops] GET request params:', { lat, lng, radius, crypto, count })
+    console.log('[/api/shops] GET request params:', { lat, lng, radius, swLat, swLng, neLat, neLng, crypto, count })
     
     const supabase = await createClient()
     
-    // If lat/lng provided, get nearby shops
+    // If bounding box provided, get shops in bounds
+    if (swLat && swLng && neLat && neLng) {
+      console.log('[/api/shops] Calling get_shops_in_bounds RPC with:', {
+        swLat: parseFloat(swLat),
+        swLng: parseFloat(swLng),
+        neLat: parseFloat(neLat),
+        neLng: parseFloat(neLng)
+      })
+      
+      const { data, error } = await (supabase as any)
+        .rpc('get_shops_in_bounds', {
+          sw_lat: parseFloat(swLat),
+          sw_lng: parseFloat(swLng),
+          ne_lat: parseFloat(neLat),
+          ne_lng: parseFloat(neLng)
+        })
+      
+      if (error) {
+        console.error('[/api/shops] RPC error:', error)
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      
+      console.log('[/api/shops] RPC success, returned', data?.length || 0, 'shops')
+      return NextResponse.json({ data })
+    }
+    
+    // If lat/lng provided, get nearby shops (legacy support)
     if (lat && lng) {
       console.log('[/api/shops] Calling get_nearby_shops RPC with:', {
         lat: parseFloat(lat),

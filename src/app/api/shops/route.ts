@@ -9,10 +9,18 @@ export async function GET(request: NextRequest) {
     const radius = searchParams.get('radius') || '10'
     const crypto = searchParams.get('crypto')
     
+    console.log('[/api/shops] GET request params:', { lat, lng, radius, crypto })
+    
     const supabase = await createClient()
     
     // If lat/lng provided, get nearby shops
     if (lat && lng) {
+      console.log('[/api/shops] Calling get_nearby_shops RPC with:', {
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+        radius_km: parseFloat(radius)
+      })
+      
       const { data, error } = await (supabase as any)
         .rpc('get_nearby_shops', {
           lat: parseFloat(lat),
@@ -21,8 +29,18 @@ export async function GET(request: NextRequest) {
         })
       
       if (error) {
+        console.error('[/api/shops] RPC error:', error)
+        console.error('[/api/shops] Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        })
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
+      
+      console.log('[/api/shops] RPC success, returned', data?.length || 0, 'shops')
+      console.log('[/api/shops] Sample data structure:', data?.[0])
       
       return NextResponse.json({ data })
     }
@@ -47,8 +65,13 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ data })
   } catch (error) {
+    console.error('[/api/shops] Unexpected error:', error)
+    console.error('[/api/shops] Error stack:', error instanceof Error ? error.stack : 'No stack trace')
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : String(error)
+      },
       { status: 500 }
     )
   }

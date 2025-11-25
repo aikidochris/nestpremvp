@@ -1,11 +1,11 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState, useCallback, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useCallback, useEffect, type ChangeEvent } from 'react'
+import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
-import type { LayerState } from '@/components/Map/LayerToggle'
 import type L from 'leaflet'
+import { uploadHomeStoryImages } from '@/lib/storage'
 
 interface Shop {
   id: string
@@ -34,23 +34,61 @@ interface HomeClientProps {
 
 export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeClientProps) {
   const router = useRouter()
+  const supabase = getSupabaseClient()
+  const enableGeolocation = false // keep code for future reintroduction
   const [searchQuery, setSearchQuery] = useState('')
   const [shops, setShops] = useState<Shop[]>(initialShops)
-  const [osmShops, setOsmShops] = useState<Shop[]>([])
-  const [mapCenter, setMapCenter] = useState<[number, number]>([37.7749, -122.4194]) // Default to SF
+  const [mapCenter, setMapCenter] = useState<[number, number]>([54.9733, -1.6139]) // Default to Newcastle upon Tyne
   const [isLocating, setIsLocating] = useState(false)
-  const [layers, setLayers] = useState<LayerState>({
-    BTC: true,
-    BCH: true,
-    LTC: true,
-    XMR: true,
-    userShops: true,
-  })
-  const supabase = createClient()
+  const [selectedHome, setSelectedHome] = useState<any | null>(null)
+  const [claimRecord, setClaimRecord] = useState<any | null>(null)
+  const [claiming, setClaiming] = useState(false)
+  const [claimError, setClaimError] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<any | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [homeStory, setHomeStory] = useState<any | null>(null)
+  const [storyLoading, setStoryLoading] = useState(false)
+  const [storyError, setStoryError] = useState<string | null>(null)
+  const [storySummary, setStorySummary] = useState('')
+  const [storyFiles, setStoryFiles] = useState<File[]>([])
+  const [editingStory, setEditingStory] = useState(false)
+  const [savingStory, setSavingStory] = useState(false)
 
-  // Calculate distance between two points using Haversine formula
+  useEffect(() => {
+    let mounted = true
+
+    async function loadUser() {
+      setAuthLoading(true)
+      const { data, error } = await supabase.auth.getUser()
+      if (!mounted) return
+
+      if (!error) {
+        setCurrentUser(data.user ?? null)
+      } else {
+        console.error('[Auth] getUser error', error)
+        setCurrentUser(null)
+      }
+      setAuthLoading(false)
+    }
+
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!mounted) return
+        console.log('[Auth] onAuthStateChange', _event, session?.user?.email)
+        setCurrentUser(session?.user ?? null)
+      }
+    )
+
+    loadUser()
+
+    return () => {
+      mounted = false
+      subscription?.subscription?.unsubscribe()
+    }
+  }, [supabase])
+
   const calculateDistance = useCallback((lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371 // Earth's radius in km
+    const R = 6371
     const dLat = (lat2 - lat1) * Math.PI / 180
     const dLon = (lon2 - lon1) * Math.PI / 180
     const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
@@ -60,38 +98,22 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
     return R * c
   }, [])
 
-  // Fetch user shops based on map bounding box
   const fetchUserShops = useCallback(async (center: [number, number], bounds?: L.LatLngBounds) => {
     try {
       let url: string
-      
-      // Use bounding box if available, otherwise fall back to center point
+
       if (bounds) {
         const sw = bounds.getSouthWest()
         const ne = bounds.getNorthEast()
-        
         url = `/api/shops?swLat=${sw.lat}&swLng=${sw.lng}&neLat=${ne.lat}&neLng=${ne.lng}`
-        
-        console.log('[HomeClient] Fetching shops with bounding box:', {
-          bounds: { sw: [sw.lat, sw.lng], ne: [ne.lat, ne.lng] }
-        })
       } else {
-        // Fallback to center point with default radius for initial load
         url = `/api/shops?lat=${center[0]}&lng=${center[1]}&radius=10`
-        
-        console.log('[HomeClient] Fetching shops with center point (no bounds yet):', {
-          center
-        })
       }
-      
+
       const response = await fetch(url)
-      
+
       if (response.ok) {
         const { data } = await response.json()
-        console.log('[HomeClient] Fetched shops:', {
-          count: data?.length || 0,
-          shopIds: data?.map((s: Shop) => s.id) || []
-        })
         setShops(data || [])
       } else {
         console.error('Failed to fetch user shops:', response.statusText)
@@ -99,16 +121,110 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
     } catch (error) {
       console.error('Error fetching user shops:', error)
     }
-  }, [calculateDistance])
+  }, [])
 
-  // Handle map movement - fetch shops for new location with bounds
   const handleMapMove = useCallback((center: [number, number], bounds: L.LatLngBounds) => {
     setMapCenter(center)
     fetchUserShops(center, bounds)
   }, [fetchUserShops])
 
-  // Try to get user's geolocation on mount
   useEffect(() => {
+    // When we change home, clear old claim state first
+    if (!selectedHome) {
+      setClaimRecord(null)
+      setClaimError(null)
+      setHomeStory(null)
+      setStoryError(null)
+      setStorySummary('')
+      setStoryFiles([])
+      setEditingStory(false)
+      return
+    }
+
+    let isCancelled = false
+
+    async function loadClaim() {
+      setClaimRecord(null)
+      setClaimError(null)
+      setHomeStory(null)
+      setStoryError(null)
+      setStorySummary('')
+      setStoryFiles([])
+      setEditingStory(false)
+
+      const { data, error } = await supabase
+        .from('property_claims')
+        .select('*')
+        .eq('property_id', selectedHome.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (isCancelled) return
+
+      if (error) {
+        // Log but don’t keep stale claim
+        console.error('Error loading claim record', error)
+        setClaimRecord(null)
+        return
+      }
+
+      setClaimRecord(data ?? null)
+    }
+
+    loadClaim()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [selectedHome, supabase])
+
+  useEffect(() => {
+    if (!selectedHome) return
+
+    let cancelled = false
+
+    async function loadStory() {
+      setStoryLoading(true)
+      setStoryError(null)
+
+      const { data, error } = await supabase
+        .from('home_story')
+        .select('*')
+        .eq('property_id', selectedHome.id)
+        .maybeSingle()
+
+      if (cancelled) {
+        setStoryLoading(false)
+        return
+      }
+
+      if (error) {
+        console.error('Error loading home story', error)
+        setHomeStory(null)
+        setStorySummary('')
+        setStoryError(error.message)
+      } else {
+        setHomeStory(data ?? null)
+        setStorySummary(data?.summary_text ?? '')
+      }
+
+      setStoryLoading(false)
+    }
+
+    loadStory()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedHome, supabase])
+
+  useEffect(() => {
+    if (!enableGeolocation) {
+      fetchUserShops(mapCenter)
+      return
+    }
+
     if ('geolocation' in navigator) {
       setIsLocating(true)
       navigator.geolocation.getCurrentPosition(
@@ -123,87 +239,138 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
         },
         (error) => {
           console.log('Geolocation error:', error.message, '- using default location')
-          // Fall back to default location (San Francisco)
           fetchUserShops(mapCenter)
           setIsLocating(false)
         },
         {
           timeout: 5000,
-          maximumAge: 300000, // Cache for 5 minutes
+          maximumAge: 300000,
         }
       )
     } else {
-      // Geolocation not supported, use default
       fetchUserShops(mapCenter)
     }
   }, []) // Only run once on mount
 
-  // Get visible shops based on layer filters
   const getVisibleShops = useCallback(() => {
-    const visible: Shop[] = []
-
-    // Add user shops if layer is active
-    if (layers.userShops) {
-      visible.push(...shops.map(shop => ({ ...shop, source: 'user' as const })))
-    }
-
-    // Add OSM shops filtered by crypto type
-    osmShops.forEach(shop => {
-      const hasVisibleCrypto = shop.crypto_accepted.some(crypto => {
-        return layers[crypto as keyof LayerState]
-      })
-      if (hasVisibleCrypto) {
-        visible.push(shop)
-      }
-    })
-
-    return visible
-  }, [shops, osmShops, layers])
+    return shops.map(shop => ({ ...shop, source: 'user' as const }))
+  }, [shops])
 
   const handleShopClick = (shop: Shop) => {
-    // Only navigate to detail page for user-submitted shops
-    // OSM shops don't have database records, so they can only be viewed in the map popup
-    const isOsmShop = shop.source === 'osm' || shop.id.startsWith('osm-')
-    
-    console.log('[HomeClient] handleShopClick called:', {
-      id: shop.id,
-      name: shop.name,
-      source: shop.source,
-      isOsmShop,
-      willNavigate: !isOsmShop
-    })
-    
-    if (!isOsmShop) {
-      router.push(`/shops/${shop.id}`)
-    }
-    // For OSM shops, do nothing - the popup already shows all available info
+    router.push(`/shops/${shop.id}`)
   }
 
-  // Handle OSM shops update from map
-  const handleOsmShopsUpdate = useCallback((newOsmShops: Shop[]) => {
-    setOsmShops(newOsmShops)
-  }, [])
+  const handleClaimHome = async () => {
+    if (!selectedHome) return
 
-  // Handle layer changes from map
-  const handleLayerChange = useCallback((newLayers: LayerState) => {
-    setLayers(newLayers)
-  }, [])
+    setClaimError(null)
+
+    if (!currentUser) {
+      router.push('/auth/login?redirect=/')
+      return
+    }
+
+    setClaiming(true)
+
+    const { error } = await supabase
+      .from('property_claims')
+      .insert({
+        property_id: selectedHome.id,
+        user_id: currentUser.id,
+        status: 'claimed',
+      })
+
+    setClaiming(false)
+
+    if (error) {
+      setClaimError(error.message)
+      return
+    }
+
+    const { data: latest, error: latestError } = await supabase
+      .from('property_claims')
+      .select('*')
+      .eq('property_id', selectedHome.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!latestError) {
+      setClaimRecord(latest ?? null)
+    }
+  }
+
+  const handleStoryFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    setStoryFiles(files ? Array.from(files) : [])
+  }
+
+  const handleSaveStory = async () => {
+    if (!selectedHome) return
+    if (!isClaimedByYou) {
+      setStoryError('Only the claimant can edit this home story.')
+      return
+    }
+
+    setSavingStory(true)
+    setStoryError(null)
+
+    try {
+      let uploadedUrls: string[] = []
+
+      if (storyFiles.length) {
+        uploadedUrls = await uploadHomeStoryImages(supabase, selectedHome.id, storyFiles)
+      }
+
+      const mergedImages = [...(homeStory?.images ?? []), ...uploadedUrls]
+
+      const { data, error } = await supabase
+        .from('home_story')
+        .upsert({
+          property_id: selectedHome.id,
+          summary_text: storySummary || null,
+          images: mergedImages.length ? mergedImages : null,
+        })
+        .select('*')
+        .single()
+
+      if (error) {
+        setStoryError(error.message)
+        return
+      }
+
+      setHomeStory(data)
+      setStoryFiles([])
+      setEditingStory(false)
+    } catch (err: any) {
+      setStoryError(err.message ?? 'Failed to save home story')
+    } finally {
+      setSavingStory(false)
+    }
+  }
 
   const visibleShops = getVisibleShops()
+  const isClaimedByYou = !!(
+    claimRecord &&
+    currentUser &&
+    selectedHome &&
+    claimRecord.property_id === selectedHome.id &&
+    claimRecord.user_id === currentUser.id
+  )
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    router.refresh()
+    setCurrentUser(null)
+    router.push('/')
   }
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-orange-50 to-amber-50">
-      {/* Header */}
       <header className="bg-white shadow-lg border-b-4 border-orange-500 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
-              <span className="text-6xl">☕</span>
+              <span className="text-6xl">�~</span>
               <div>
                 <h1 className="text-4xl font-black text-gray-900">
                   Bitcoin<span className="text-orange-600">Latte</span>
@@ -212,25 +379,29 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
               </div>
             </div>
             <div className="flex gap-3 items-center">
-              {user && isAdmin && (
+              {(isAdmin && currentUser) && (
                 <a
                   href="/admin"
                   className="px-6 py-3 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700 transition-all hover:scale-105 shadow-lg"
                 >
-                  👑 Admin
+                  �Y'' Admin
                 </a>
               )}
               <a
                 href="/shops/submit"
                 className="px-6 py-3 bg-orange-600 text-white rounded-lg font-bold hover:bg-orange-700 transition-all hover:scale-105 shadow-lg"
               >
-                ➕ Add Shop
+                �z Add Shop
               </a>
-              {user ? (
+              {authLoading ? (
+                <div className="px-4 py-2 bg-gray-100 border rounded-lg text-sm text-gray-600">
+                  Checking session...
+                </div>
+              ) : currentUser ? (
                 <div className="flex items-center gap-3">
                   <div className="px-4 py-2 bg-green-100 border-2 border-green-500 rounded-lg">
                     <span className="text-green-700 font-bold text-sm">
-                      ✓ {user.email}
+                      �o" {currentUser.email}
                     </span>
                   </div>
                   <button
@@ -250,7 +421,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
               )}
             </div>
           </div>
-          
+
           <div className="relative">
             <input
               type="text"
@@ -259,18 +430,17 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full px-6 py-4 pl-14 text-lg border-2 border-gray-300 rounded-xl focus:border-orange-500 focus:ring-4 focus:ring-orange-200 outline-none transition-all"
             />
-            <span className="absolute left-5 top-1/2 -translate-y-1/2 text-2xl">🔍</span>
+            <span className="absolute left-5 top-1/2 -translate-y-1/2 text-2xl">�Y"?</span>
           </div>
         </div>
       </header>
 
-      {/* Stats */}
       <div className="bg-white border-b-2 border-gray-200 py-6 shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-2xl shadow-xl">
               <div className="flex items-center gap-4">
-                <span className="text-5xl">🏪</span>
+                <span className="text-5xl">�Y?�</span>
                 <div>
                   <p className="text-4xl font-black">{shops.length}</p>
                   <p className="text-orange-100 font-bold uppercase text-sm">Coffee Shops</p>
@@ -279,7 +449,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
             </div>
             <div className="bg-gradient-to-br from-amber-500 to-yellow-500 text-white p-6 rounded-2xl shadow-xl">
               <div className="flex items-center gap-4">
-                <span className="text-5xl">₿</span>
+                <span className="text-5xl">�'�</span>
                 <div>
                   <p className="text-3xl font-black">Bitcoin</p>
                   <p className="text-amber-100 font-bold uppercase text-sm">Accepted</p>
@@ -288,7 +458,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
             </div>
             <div className="bg-gradient-to-br from-yellow-500 to-orange-400 text-white p-6 rounded-2xl shadow-xl">
               <div className="flex items-center gap-4">
-                <span className="text-5xl">⚡</span>
+                <span className="text-5xl">�s�</span>
                 <div>
                   <p className="text-3xl font-black">Lightning</p>
                   <p className="text-yellow-100 font-bold uppercase text-sm">Fast Payments</p>
@@ -299,7 +469,6 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
         </div>
       </div>
 
-      {/* Map */}
       <div className="flex-1 p-6 flex flex-col">
         <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-orange-500 flex-1 flex flex-col relative">
@@ -311,22 +480,257 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
             )}
             <div className="flex-1 w-full h-full">
               <ShopMap
-                shops={shops}
+                shops={[]} // data comes from /api/properties
                 center={mapCenter}
                 zoom={13}
-                onShopClick={handleShopClick}
+                onShopClick={(shop) => setSelectedHome(shop)}
                 onMapMove={handleMapMove}
-                onOsmShopsUpdate={handleOsmShopsUpdate}
-                onLayerChange={handleLayerChange}
               />
             </div>
           </div>
 
-          {/* Shop List View */}
+          {selectedHome && (
+            <div className="fixed right-4 top-4 w-80 bg-white shadow-xl border border-gray-200 rounded-2xl p-5 z-[1100]">
+              
+              {/* Header */}
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="font-semibold text-lg text-gray-900 leading-tight">
+                  {selectedHome.name}
+                </h2>
+                <button
+                  onClick={() => setSelectedHome(null)}
+                  className="text-gray-400 hover:text-gray-600 text-sm"
+                >
+                  ?o
+                </button>
+              </div>
+
+              {/* Address */}
+              <p className="text-sm text-gray-700 mb-4">
+                {selectedHome.address}
+              </p>
+
+              {/* Status */}
+              <div className="mb-4">
+                {!claimRecord && (
+                  <span className="inline-block px-2 py-1 text-xs rounded-md bg-amber-100 text-amber-800 font-medium">
+                    Unclaimed
+                  </span>
+                )}
+                {claimRecord && isClaimedByYou && (
+                  <span className="inline-block px-2 py-1 text-xs rounded-md bg-green-100 text-green-800 font-medium">
+                    Claimed by you
+                  </span>
+                )}
+                {claimRecord && !isClaimedByYou && claimRecord.property_id === selectedHome.id && (
+                  <span className="inline-block px-2 py-1 text-xs rounded-md bg-gray-100 text-gray-700 font-medium">
+                    Already claimed
+                  </span>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-2">
+                {!claimRecord && (
+                  <button
+                    className="w-full bg-amber-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    onClick={handleClaimHome}
+                    disabled={claiming}
+                  >
+                    {claiming ? 'Claiming...' : 'Claim this home'}
+                  </button>
+                )}
+
+                {claimRecord && isClaimedByYou && (
+                  <button
+                    className="w-full bg-gray-100 text-gray-800 py-2 rounded-lg text-sm font-medium cursor-not-allowed"
+                    disabled
+                  >
+                    You already claimed this home
+                  </button>
+                )}
+
+                {claimRecord && !isClaimedByYou && claimRecord.property_id === selectedHome.id && (
+                  <button
+                    className="w-full bg-gray-100 text-gray-800 py-2 rounded-lg text-sm font-medium cursor-not-allowed"
+                    disabled
+                  >
+                    Already claimed
+                  </button>
+                )}
+
+                <button
+                  className="w-full bg-gray-100 text-gray-800 py-2 rounded-lg text-sm font-medium hover:bg-gray-200"
+                  onClick={() => alert("Future: full property sheet")}
+                >
+                  See more ??'
+                </button>
+              </div>
+
+              {claimError && (
+                <div className="mt-2 text-sm text-red-600">
+                  {claimError}
+                </div>
+              )}
+
+              <div className="mt-6 border-t border-gray-200 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-base font-semibold text-gray-900">Home Story</h3>
+                  {homeStory && isClaimedByYou && !editingStory && (
+                    <button
+                      className="text-sm text-amber-700 hover:text-amber-800 font-semibold"
+                      onClick={() => setEditingStory(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+
+                {storyLoading ? (
+                  <div className="text-sm text-gray-500">Loading home story...</div>
+                ) : (
+                  <>
+                    {storyError && (
+                      <div className="mb-3 text-sm text-red-600">
+                        {storyError}
+                      </div>
+                    )}
+
+                    {isClaimedByYou ? (
+                      <>
+                        {(!homeStory || editingStory) ? (
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-sm font-medium text-gray-800 block mb-1">
+                                Summary
+                              </label>
+                              <textarea
+                                value={storySummary}
+                                onChange={(e) => setStorySummary(e.target.value)}
+                                rows={4}
+                                className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                placeholder="Share a short story about this home..."
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-sm font-medium text-gray-800 block mb-1">
+                                Photos
+                              </label>
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                onChange={handleStoryFileChange}
+                                className="w-full text-sm text-gray-700"
+                              />
+                              {storyFiles.length > 0 && (
+                                <div className="text-xs text-gray-600 mt-1">
+                                  {storyFiles.length} file{storyFiles.length > 1 ? 's' : ''} selected
+                                </div>
+                              )}
+                              {homeStory?.images?.length ? (
+                                <div className="mt-2 grid grid-cols-3 gap-2">
+                                  {homeStory.images.map((url: string) => (
+                                    <img
+                                      key={url}
+                                      src={url}
+                                      alt="Home story"
+                                      className="h-16 w-full object-cover rounded-md border"
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="flex gap-2">
+                              <button
+                                className="flex-1 bg-amber-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                                onClick={handleSaveStory}
+                                disabled={savingStory}
+                              >
+                                {savingStory ? 'Saving...' : 'Save story'}
+                              </button>
+                              {homeStory && (
+                                <button
+                                  className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                                  onClick={() => {
+                                    setEditingStory(false)
+                                    setStoryFiles([])
+                                    setStorySummary(homeStory?.summary_text ?? '')
+                                    setStoryError(null)
+                                  }}
+                                  type="button"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {homeStory?.summary_text ? (
+                              <p className="text-sm text-gray-800 whitespace-pre-line">
+                                {homeStory.summary_text}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-gray-500">No story added yet.</p>
+                            )}
+                            {homeStory?.images?.length ? (
+                              <div className="grid grid-cols-3 gap-2">
+                                {homeStory.images.map((url: string) => (
+                                  <img
+                                    key={url}
+                                    src={url}
+                                    alt="Home story"
+                                    className="h-16 w-full object-cover rounded-md border"
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {homeStory ? (
+                          <div className="space-y-2">
+                            {homeStory.summary_text ? (
+                              <p className="text-sm text-gray-800 whitespace-pre-line">
+                                {homeStory.summary_text}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-gray-500">No story text provided.</p>
+                            )}
+                            {homeStory.images?.length ? (
+                              <div className="grid grid-cols-3 gap-2">
+                                {homeStory.images.map((url: string) => (
+                                  <img
+                                    key={url}
+                                    src={url}
+                                    alt="Home story"
+                                    className="h-16 w-full object-cover rounded-md border"
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">No home story yet.</p>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+
+            </div>
+          )}
+
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-orange-500 p-6">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-black text-gray-900">
-                📍 Shops in View
+                �Y"? Shops in View
               </h2>
               <div className="text-sm">
                 <span className="font-bold text-gray-900">{visibleShops.length}</span>
@@ -336,23 +740,21 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
 
             {visibleShops.length === 0 ? (
               <div className="text-center py-12">
-                <div className="text-6xl mb-4">🔍</div>
+                <div className="text-6xl mb-4">�Y"?</div>
                 <p className="text-xl font-bold text-gray-700 mb-2">No shops found</p>
                 <p className="text-gray-600">
-                  Try zooming out or enabling more layers to see shops in this area
+                  Try zooming out or exploring another area to see shops
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {visibleShops
                   .sort((a, b) => {
-                    // Calculate distance from map center for each shop
                     const distA = calculateDistance(mapCenter[0], mapCenter[1], a.latitude, a.longitude)
                     const distB = calculateDistance(mapCenter[0], mapCenter[1], b.latitude, b.longitude)
                     return distA - distB
                   })
                   .map((shop) => {
-                    const isOsmShop = shop.source === 'osm'
                     const distance = calculateDistance(
                       mapCenter[0],
                       mapCenter[1],
@@ -363,27 +765,15 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                     return (
                       <div
                         key={shop.id}
-                        className={`bg-gradient-to-br ${
-                          isOsmShop
-                            ? 'from-blue-50 to-blue-100 border-blue-300'
-                            : 'from-amber-50 to-orange-100 border-orange-300'
-                        } border-2 rounded-xl p-4 hover:shadow-lg transition-all ${
-                          !isOsmShop ? 'cursor-pointer hover:scale-105' : ''
-                        }`}
-                        onClick={() => !isOsmShop && handleShopClick(shop)}
+                        className="bg-gradient-to-br from-amber-50 to-orange-100 border-orange-300 border-2 rounded-xl p-4 hover:shadow-lg transition-all cursor-pointer hover:scale-105"
+                        onClick={() => handleShopClick(shop)}
                       >
                         <div className="flex items-start justify-between gap-2 mb-2">
                           <h3 className="font-bold text-lg text-gray-900 flex-1">
                             {shop.name}
                           </h3>
-                          <span
-                            className={`text-xs px-2 py-1 rounded-full font-semibold ${
-                              isOsmShop
-                                ? 'bg-blue-200 text-blue-800'
-                                : 'bg-amber-200 text-amber-800'
-                            }`}
-                          >
-                            {isOsmShop ? 'OSM' : 'User'}
+                          <span className="text-xs px-2 py-1 rounded-full font-semibold bg-amber-200 text-amber-800">
+                            User
                           </span>
                         </div>
 
@@ -392,7 +782,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                         </p>
 
                         <div className="flex items-center gap-2 mb-3 text-xs text-gray-500">
-                          <span>📍</span>
+                          <span>�Y"?</span>
                           <span className="font-semibold">
                             {distance < 1
                               ? `${(distance * 1000).toFixed(0)}m away`
@@ -429,41 +819,15 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                           </div>
                         )}
 
-                        {isOsmShop ? (
-                          <div className="space-y-1">
-                            {shop.opening_hours && (
-                              <p className="text-xs text-gray-600">
-                                <span className="font-semibold">Hours:</span> {shop.opening_hours}
-                              </p>
-                            )}
-                            {shop.phone && (
-                              <p className="text-xs text-gray-600">
-                                <span className="font-semibold">Phone:</span> {shop.phone}
-                              </p>
-                            )}
-                            {shop.website && (
-                              <a
-                                href={shop.website}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-blue-600 hover:underline font-semibold inline-block"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                Visit Website →
-                              </a>
-                            )}
-                          </div>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleShopClick(shop)
-                            }}
-                            className="w-full mt-2 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-bold transition-colors"
-                          >
-                            View Details →
-                          </button>
-                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleShopClick(shop)
+                          }}
+                          className="w-full mt-2 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-bold transition-colors"
+                        >
+                          View Details ��'
+                        </button>
                       </div>
                     )
                   })}
@@ -473,12 +837,11 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
         </div>
       </div>
 
-      {/* Footer */}
       <footer className="bg-gray-900 text-white py-8 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4">
             <div className="flex items-center gap-3">
-              <span className="text-3xl">🌍</span>
+              <span className="text-3xl">�YO?</span>
               <p className="font-bold text-lg">
                 Empowering the Bitcoin economy, one coffee at a time
               </p>
@@ -493,7 +856,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                 rel="noopener noreferrer"
                 className="font-bold hover:text-orange-400 transition-colors flex items-center gap-2"
               >
-                GitHub <span>↗</span>
+                GitHub <span>��-</span>
               </a>
             </div>
           </div>

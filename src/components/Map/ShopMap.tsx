@@ -181,6 +181,8 @@ export default function ShopMap({
   const [osmShops, setOsmShops] = useState<OsmShop[]>([])
   const [loading, setLoading] = useState(false)
   const [currentCenter, setCurrentCenter] = useState<[number, number]>(center)
+  // NEST: store homes from /api/properties
+  const [propertyShops, setPropertyShops] = useState<Shop[]>([])
   const abortControllerRef = useRef<AbortController | null>(null)
   const [layers, setLayers] = useState<LayerState>(() => {
     // Load layer preferences from localStorage
@@ -208,64 +210,36 @@ export default function ShopMap({
     setMounted(true)
   }, [])
 
-  // Fetch OSM shops based on map bounds
-  const fetchOsmShops = useCallback(async (bounds: L.LatLngBounds) => {
-    console.log('[ShopMap] fetchOsmShops called with bounds:', bounds.toBBoxString())
-    
-    // Cancel any pending request
-    if (abortControllerRef.current) {
-      console.log('[ShopMap] Aborting previous request')
-      abortControllerRef.current.abort()
-    }
-    
-    // Create new AbortController for this request
-    abortControllerRef.current = new AbortController()
-    const signal = abortControllerRef.current.signal
-    
-    setLoading(true)
-    try {
-      // Use actual map bounds for bbox
-      const sw = bounds.getSouthWest()
-      const ne = bounds.getNorthEast()
-      const bbox = [
-        sw.lat, // south
-        sw.lng, // west
-        ne.lat, // north
-        ne.lng, // east
-      ]
+  // NEST: fetch Supabase homes
+  useEffect(() => {
+    const fetchProperties = async () => {
+      try {
+        const res = await fetch('/api/properties')
+        const json = await res.json()
 
-      console.log('[ShopMap] Calculated bbox from map bounds:', bbox)
-      console.log('[ShopMap] Bbox covers visible area')
+        const mapped: Shop[] = (json.properties || []).map((p: any) => ({
+          id: p.id,
+          name: `${p.house_number} ${p.street}`,
+          address: `${p.house_number} ${p.street}, ${p.postcode}`,
+          latitude: p.lat,
+          longitude: p.lon,
+          crypto_accepted: ['BTC'], // required by type, ignored
+          source: 'user'
+        }))
 
-      const url = `/api/osm-crypto-shops?bbox=${bbox.join(',')}`
-      console.log('[ShopMap] Fetching from:', url)
-      
-      const response = await fetch(url, { signal })
-      
-      console.log('[ShopMap] Response status:', response.status, response.statusText)
-      
-      if (response.ok) {
-        const data = await response.json()
-        console.log('[ShopMap] Received data:', { shopCount: data.shops?.length || 0, cached: data.cached })
-        const newOsmShops = data.shops || []
-        setOsmShops(newOsmShops)
-        // Notify parent component of OSM shops update
-        onOsmShopsUpdate?.(newOsmShops)
-      } else {
-        const errorText = await response.text()
-        console.error('[ShopMap] Failed to fetch OSM shops:', response.status, response.statusText, errorText)
+        setPropertyShops(mapped)
+      } catch (err) {
+        console.error('Failed to fetch properties', err)
       }
-    } catch (error) {
-      // Ignore abort errors - they're expected when cancelling requests
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('[ShopMap] Request aborted (expected behavior)')
-        return
-      }
-      console.error('[ShopMap] Error fetching OSM shops:', error)
-    } finally {
-      setLoading(false)
     }
-  }, [onOsmShopsUpdate])
+
+    fetchProperties()
+  }, [])
+
+  // NEST: OSM disabled for pre-MVP
+  const fetchOsmShops = useCallback(async (_bounds: L.LatLngBounds) => {
+    return
+  }, [])
 
   // Handle map movement
   const handleMapMove = useCallback((newCenter: [number, number], bounds: L.LatLngBounds) => {
@@ -301,26 +275,9 @@ export default function ShopMap({
     onLayerChange?.(layers)
   }, [layers, onLayerChange])
 
-  // Filter shops based on active layers
+  // NEST: only show homes from Supabase
   const getVisibleShops = () => {
-    const visible: Shop[] = []
-
-    // Add user shops if layer is active
-    if (layers.userShops) {
-      visible.push(...shops.map(shop => ({ ...shop, source: 'user' as const })))
-    }
-
-    // Add OSM shops filtered by crypto type
-    osmShops.forEach(shop => {
-      const hasVisibleCrypto = shop.crypto_accepted.some(crypto => {
-        return layers[crypto as keyof typeof cryptoIcons]
-      })
-      if (hasVisibleCrypto) {
-        visible.push(shop)
-      }
-    })
-
-    return visible
+    return propertyShops
   }
 
   // Get appropriate icon for a shop
@@ -381,78 +338,23 @@ export default function ShopMap({
             }}
           >
             <Popup>
-              <div className="p-3 min-w-[250px]">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <h3 className="font-bold text-lg text-stone-900">{shop.name}</h3>
-                  {shop.source === 'osm' && (
-                    <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-semibold">
-                      OSM
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-stone-600 mb-2">{shop.address}</p>
-                
-                {shop.crypto_accepted && shop.crypto_accepted.length > 0 && (
-                  <div className="mt-2 flex gap-1 flex-wrap">
-                    {shop.crypto_accepted.map((crypto) => (
-                      <span
-                        key={crypto}
-                        className="px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded-md font-medium"
-                      >
-                        {crypto}
-                      </span>
-                    ))}
-                  </div>
-                )}
+              <div className="p-3 min-w-[220px]">
+                <h3 className="font-bold text-lg text-stone-900 mb-1">
+                  {shop.name}
+                </h3>
+                <p className="text-sm text-stone-600 mb-3">
+                  {shop.address}
+                </p>
 
-                {shop.source === 'osm' && (
-                  <div className="mt-3 pt-3 border-t border-gray-200 space-y-1 text-xs text-gray-600">
-                    {shop.shop_type && (
-                      <div>
-                        <span className="font-semibold">Type:</span> {shop.shop_type}
-                      </div>
-                    )}
-                    {shop.opening_hours && (
-                      <div>
-                        <span className="font-semibold">Hours:</span> {shop.opening_hours}
-                      </div>
-                    )}
-                    {shop.phone && (
-                      <div>
-                        <span className="font-semibold">Phone:</span> {shop.phone}
-                      </div>
-                    )}
-                    {shop.website && (
-                      <div>
-                        <a
-                          href={shop.website}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          Visit Website →
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {shop.source === 'user' && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation() // Prevent marker click from firing again
-                      onShopClick?.(shop)
-                    }}
-                    className="mt-3 w-full px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium transition-colors"
-                  >
-                    View Details →
-                  </button>
-                )}
-                {shop.source === 'osm' && (
-                  <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
-                    <span className="font-semibold">ℹ️ OSM Shop:</span> This shop is from OpenStreetMap. All available information is shown above.
-                  </div>
-                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onShopClick?.(shop)
+                  }}
+                  className="w-full px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium transition-colors"
+                >
+                  View home →
+                </button>
               </div>
             </Popup>
           </Marker>
@@ -460,28 +362,16 @@ export default function ShopMap({
       </MapContainer>
 
       {/* Layer Toggle Control */}
-      <LayerToggle layers={layers} onLayerChange={setLayers} />
+      {/* NEST: no crypto layers */}
 
       {/* Loading Indicator */}
-      {loading && (
-        <div className="absolute bottom-4 left-4 z-[1000] bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-200">
-          <div className="flex items-center gap-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-2 border-orange-500 border-t-transparent" />
-            <span className="text-sm font-semibold text-gray-700">Loading OSM shops...</span>
-          </div>
-        </div>
-      )}
+      {/* NEST: no OSM loading indicator */}
 
       {/* Shop Count */}
       <div className="absolute bottom-4 right-4 z-[1000] bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-200">
         <div className="text-sm">
           <span className="font-bold text-gray-900">{visibleShops.length}</span>
-          <span className="text-gray-600"> shops visible</span>
-          {osmShops.length > 0 && (
-            <span className="text-xs text-gray-500 ml-2">
-              ({shops.length} user, {osmShops.length} OSM)
-            </span>
-          )}
+          <span className="text-gray-600"> homes visible</span>
         </div>
       </div>
     </div>

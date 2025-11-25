@@ -1,37 +1,39 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { getSupabaseClient } from '@/lib/supabaseClient'
 
 export default function LoginPage() {
+  const supabase = getSupabaseClient()
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState('')
-  const router = useRouter()
-  const supabase = createClient()
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setMessage('')
+    setError(null)
+    setSuccess(false)
 
     try {
-      const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin
-      const { error } = await supabase.auth.signInWithOtp({
+      const redirectTo =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}/auth/callback`
+          : 'http://localhost:3000/auth/callback'
+
+      const { error: authError } = await supabase.auth.signInWithOtp({
         email,
-        options: {
-          emailRedirectTo: `${redirectUrl}/api/auth/callback`,
-        },
+        options: { emailRedirectTo: redirectTo },
       })
 
-      if (error) {
-        setMessage(`Error: ${error.message}`)
+      if (authError) {
+        setError(authError.message)
       } else {
-        setMessage('Check your email for the magic link!')
+        setSuccess(true)
       }
-    } catch (error) {
-      setMessage('An error occurred. Please try again.')
+    } catch (err) {
+      setError('Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -39,121 +41,50 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-amber-50 flex items-center justify-center px-4 py-12">
-      <div className="max-w-md w-full">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center mb-4">
-            <span className="text-6xl">☕</span>
-          </div>
-          <h1 className="text-4xl sm:text-5xl font-black text-gray-900 mb-3">
-            Bitcoin<span className="text-orange-600">Latte</span>
-          </h1>
-          <p className="text-gray-600 text-lg font-medium">
-            Sign in to vote, comment, and track submissions
+      <div className="w-full max-w-md">
+        <div className="bg-white border border-gray-200 shadow-xl rounded-2xl p-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Sign in to Nest</h1>
+          <p className="text-sm text-gray-600 mb-6">
+            We&apos;ll email you a magic link to sign in.
           </p>
-        </div>
 
-        {/* Login Form */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-orange-200">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 flex items-center justify-center text-white text-2xl shadow-lg">
-              🔐
-            </div>
-            <h2 className="text-2xl font-black text-gray-900">Sign In</h2>
-          </div>
-          
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-              <label className="block text-sm font-bold text-gray-900 mb-2">
-                Email Address
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-900" htmlFor="email">
+                Email
               </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-3.5 pl-11 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-orange-200 focus:border-orange-500 transition-all outline-none text-gray-900"
-                  placeholder="your@email.com"
-                  disabled={loading}
-                />
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">
-                  ✉️
-                </span>
-              </div>
+              <input
+                id="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                placeholder="you@example.com"
+                disabled={loading}
+              />
             </div>
+
+            {error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+
+            {success && (
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                Check your email for the login link.
+              </div>
+            )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full px-6 py-4 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:shadow-xl hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all duration-200 font-black text-lg flex items-center justify-center gap-2 shadow-lg"
+              className="w-full rounded-lg bg-amber-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? (
-                <>
-                  <span className="animate-spin">⏳</span>
-                  <span>Sending magic link...</span>
-                </>
-              ) : (
-                <>
-                  <span>⚡</span>
-                  <span>Send Magic Link</span>
-                </>
-              )}
+              {loading ? 'Sending...' : 'Send magic link'}
             </button>
           </form>
-
-          {/* Message */}
-          {message && (
-            <div className={`mt-5 p-4 rounded-xl border-4 ${
-              message.includes('Error')
-                ? 'bg-red-50 border-red-300 text-red-700'
-                : 'bg-green-50 border-green-300 text-green-700'
-            }`}>
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">{message.includes('Error') ? '❌' : '✅'}</span>
-                <p className="text-sm font-bold flex-1">{message}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Info */}
-          <div className="mt-6 pt-6 border-t-2 border-gray-200">
-            <div className="flex items-start gap-3 text-sm text-gray-700">
-              <span className="text-2xl">💡</span>
-              <p>
-                <strong className="text-gray-900 font-bold">No password required!</strong>
-                <br />
-                We'll send you a secure magic link to sign in instantly.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Back Link */}
-        <div className="mt-8 text-center">
-          <a
-            href="/"
-            className="inline-flex items-center gap-2 text-gray-600 hover:text-orange-600 transition-colors font-bold text-lg"
-          >
-            <span>←</span>
-            <span>Back to Map</span>
-          </a>
-        </div>
-
-        {/* Features */}
-        <div className="mt-8 grid grid-cols-3 gap-4 text-center">
-          <div className="p-4 rounded-xl bg-white border-2 border-orange-200 shadow-md hover:shadow-lg transition-shadow">
-            <div className="text-3xl mb-2">👍</div>
-            <p className="text-xs text-gray-700 font-bold">Vote on Shops</p>
-          </div>
-          <div className="p-4 rounded-xl bg-white border-2 border-orange-200 shadow-md hover:shadow-lg transition-shadow">
-            <div className="text-3xl mb-2">💬</div>
-            <p className="text-xs text-gray-700 font-bold">Leave Comments</p>
-          </div>
-          <div className="p-4 rounded-xl bg-white border-2 border-orange-200 shadow-md hover:shadow-lg transition-shadow">
-            <div className="text-3xl mb-2">📍</div>
-            <p className="text-xs text-gray-700 font-bold">Track Submissions</p>
-          </div>
         </div>
       </div>
     </div>

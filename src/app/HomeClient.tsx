@@ -51,8 +51,13 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
   const [storyError, setStoryError] = useState<string | null>(null)
   const [storySummary, setStorySummary] = useState('')
   const [storyFiles, setStoryFiles] = useState<File[]>([])
+  const [storyImages, setStoryImages] = useState<string[]>([])
   const [editingStory, setEditingStory] = useState(false)
   const [savingStory, setSavingStory] = useState(false)
+  const [isOpenToTalking, setIsOpenToTalking] = useState(false)
+  const [softListingLoading, setSoftListingLoading] = useState(false)
+  const [softListingSaving, setSoftListingSaving] = useState(false)
+  const [softListingError, setSoftListingError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -137,7 +142,12 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
       setStoryError(null)
       setStorySummary('')
       setStoryFiles([])
+      setStoryImages([])
       setEditingStory(false)
+      setIsOpenToTalking(false)
+      setSoftListingLoading(false)
+      setSoftListingSaving(false)
+      setSoftListingError(null)
       return
     }
 
@@ -150,7 +160,12 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
       setStoryError(null)
       setStorySummary('')
       setStoryFiles([])
+      setStoryImages([])
       setEditingStory(false)
+      setIsOpenToTalking(false)
+      setSoftListingLoading(false)
+      setSoftListingSaving(false)
+      setSoftListingError(null)
 
       const { data, error } = await supabase
         .from('property_claims')
@@ -203,10 +218,12 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
         console.error('Error loading home story', error)
         setHomeStory(null)
         setStorySummary('')
+        setStoryImages([])
         setStoryError(error.message)
       } else {
         setHomeStory(data ?? null)
         setStorySummary(data?.summary_text ?? '')
+        setStoryImages(data?.images ?? [])
       }
 
       setStoryLoading(false)
@@ -218,6 +235,55 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
       cancelled = true
     }
   }, [selectedHome, supabase])
+
+  useEffect(() => {
+    const currentUserId = currentUser?.id
+    const propertyClaimedByCurrentUser =
+      !!currentUserId &&
+      !!selectedHome &&
+      !!claimRecord &&
+      claimRecord.property_id === selectedHome.id &&
+      claimRecord.user_id === currentUserId
+
+    if (!selectedHome || !propertyClaimedByCurrentUser) {
+      setIsOpenToTalking(false)
+      setSoftListingError(null)
+      setSoftListingLoading(false)
+      return
+    }
+
+    let cancelled = false
+
+    async function loadSoftListing() {
+      setSoftListingLoading(true)
+      setSoftListingError(null)
+
+      const { data, error } = await supabase
+        .from('intent_flags')
+        .select('soft_listing')
+        .eq('property_id', selectedHome.id)
+        .eq('owner_id', currentUserId)
+        .maybeSingle()
+
+      if (cancelled) return
+
+      if (error) {
+        console.error('Error loading conversation intent', error)
+        setSoftListingError('Could not load conversation preference.')
+        setIsOpenToTalking(false)
+      } else {
+        setIsOpenToTalking(!!data?.soft_listing)
+      }
+
+      setSoftListingLoading(false)
+    }
+
+    loadSoftListing()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedHome, claimRecord, currentUser?.id, supabase])
 
   useEffect(() => {
     if (!enableGeolocation) {
@@ -305,6 +371,43 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
     setStoryFiles(files ? Array.from(files) : [])
   }
 
+  const handleRemoveExistingImage = (url: string) => {
+    setStoryImages((prev) => prev.filter((img) => img !== url))
+  }
+
+  const handleToggleSoftListing = async () => {
+    if (!selectedHome || !currentUser) return
+    if (!claimRecord || claimRecord.property_id !== selectedHome.id || claimRecord.user_id !== currentUser.id) return
+
+    const previous = isOpenToTalking
+    const next = !isOpenToTalking
+
+    setIsOpenToTalking(next)
+    setSoftListingSaving(true)
+    setSoftListingError(null)
+
+    const { error } = await supabase
+      .from('intent_flags')
+      .upsert(
+        {
+          property_id: selectedHome.id,
+          owner_id: currentUser.id,
+          soft_listing: next,
+        },
+        { onConflict: 'property_id' }
+      )
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error updating conversation intent', error)
+      setIsOpenToTalking(previous)
+      setSoftListingError(error.message ?? 'Failed to update conversation preference.')
+    }
+
+    setSoftListingSaving(false)
+  }
+
   const handleSaveStory = async () => {
     if (!selectedHome) return
     if (!isClaimedByYou) {
@@ -322,15 +425,18 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
         uploadedUrls = await uploadHomeStoryImages(supabase, selectedHome.id, storyFiles)
       }
 
-      const mergedImages = [...(homeStory?.images ?? []), ...uploadedUrls]
+      const mergedImages = [...storyImages, ...uploadedUrls]
 
       const { data, error } = await supabase
         .from('home_story')
-        .upsert({
-          property_id: selectedHome.id,
-          summary_text: storySummary || null,
-          images: mergedImages.length ? mergedImages : null,
-        })
+        .upsert(
+          {
+            property_id: selectedHome.id,
+            summary_text: storySummary || null,
+            images: mergedImages.length ? mergedImages : null,
+          },
+          { onConflict: 'property_id' } // respect unique constraint for one story per property
+        )
         .select('*')
         .single()
 
@@ -341,6 +447,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
 
       setHomeStory(data)
       setStoryFiles([])
+      setStoryImages(data?.images ?? mergedImages)
       setEditingStory(false)
     } catch (err: any) {
       setStoryError(err.message ?? 'Failed to save home story')
@@ -350,13 +457,19 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
   }
 
   const visibleShops = getVisibleShops()
-  const isClaimedByYou = !!(
+  const currentUserId = currentUser?.id
+  const propertyIsClaimed = !!(
     claimRecord &&
-    currentUser &&
     selectedHome &&
-    claimRecord.property_id === selectedHome.id &&
-    claimRecord.user_id === currentUser.id
+    claimRecord.property_id === selectedHome.id
   )
+  const isOwner = !!(
+    propertyIsClaimed &&
+    currentUserId &&
+    claimRecord?.user_id === currentUserId
+  )
+  const canEditOpenToTalking = !!(isOwner && currentUserId)
+  const isClaimedByYou = isOwner
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -485,6 +598,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                 zoom={13}
                 onShopClick={(shop) => setSelectedHome(shop)}
                 onMapMove={handleMapMove}
+                currentUserId={currentUserId}
               />
             </div>
           </div>
@@ -573,6 +687,51 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                 </div>
               )}
 
+              {canEditOpenToTalking && (
+                <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Open to conversations about this home</p>
+                      <p className="text-xs text-gray-600">
+                        {isOpenToTalking
+                          ? 'People can reach out to chat about this property.'
+                          : 'Toggle on if you want to chat with interested people.'}
+                      </p>
+                      {softListingError && (
+                        <p className="mt-1 text-xs text-red-600">{softListingError}</p>
+                      )}
+                      {!softListingError && (softListingLoading || softListingSaving) && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          {softListingLoading ? 'Loading preference...' : 'Saving...'}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleSoftListing}
+                      disabled={softListingLoading || softListingSaving}
+                      className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition ${
+                        softListingLoading || softListingSaving ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                      } ${isOpenToTalking ? 'bg-amber-600' : 'bg-gray-300'}`}
+                      aria-pressed={isOpenToTalking}
+                      aria-label="Open to conversations toggle"
+                    >
+                      <span
+                        className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition ${
+                          isOpenToTalking ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!propertyIsClaimed && (
+                <p className="mt-4 text-xs text-gray-500">
+                  Claim this home to mark it as open to conversations.
+                </p>
+              )}
+
               <div className="mt-6 border-t border-gray-200 pt-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-base font-semibold text-gray-900">Home Story</h3>
@@ -629,15 +788,24 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                                   {storyFiles.length} file{storyFiles.length > 1 ? 's' : ''} selected
                                 </div>
                               )}
-                              {homeStory?.images?.length ? (
+                              {storyImages.length ? (
                                 <div className="mt-2 grid grid-cols-3 gap-2">
-                                  {homeStory.images.map((url: string) => (
-                                    <img
-                                      key={url}
-                                      src={url}
-                                      alt="Home story"
-                                      className="h-16 w-full object-cover rounded-md border"
-                                    />
+                                  {storyImages.map((url: string) => (
+                                    <div key={url} className="relative group">
+                                      <img
+                                        src={url}
+                                        alt="Home story"
+                                        className="h-16 w-full object-cover rounded-md border"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveExistingImage(url)}
+                                        className="absolute top-1 right-1 bg-black/60 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition"
+                                        aria-label="Remove image"
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
                                   ))}
                                 </div>
                               ) : null}
@@ -658,6 +826,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                                     setEditingStory(false)
                                     setStoryFiles([])
                                     setStorySummary(homeStory?.summary_text ?? '')
+                                    setStoryImages(homeStory?.images ?? [])
                                     setStoryError(null)
                                   }}
                                   type="button"

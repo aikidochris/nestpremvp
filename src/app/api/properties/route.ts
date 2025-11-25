@@ -10,8 +10,23 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 export async function GET() {
   try {
     const { data, error } = await supabase
-      .from("properties")
-      .select("id, postcode, street, house_number, lat, lon, price_estimate")
+      .from("properties_public_view")
+      .select(`
+        id,
+        uprn,
+        postcode,
+        street,
+        house_number,
+        lat,
+        lon,
+        price_estimate,
+        claimed_by_user_id,
+        is_claimed,
+        is_open_to_talking,
+        is_for_sale,
+        is_for_rent,
+        has_recent_activity
+      `)
       .limit(200);
 
     if (error) {

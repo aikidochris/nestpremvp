@@ -54,7 +54,7 @@ export default function AuthCallbackPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-stone-50">
       <div className="bg-white border border-stone-200 rounded-2xl px-6 py-4 shadow-sm text-sm text-stone-700">
-        Signing you in…
+        Signing you in.
       </div>
     </div>
   );

@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "env:local": "rm -f .env && ln -s .env.local .env",
-    "env:prod": "rm -f .env && ln -s .env.prod .env"
+    "env:prod": "rm -f .env && ln -s .env.prod .env",
+    "import:osm": "node scripts/import_osm_properties.cjs"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.10.0",
@@ -20,7 +21,8 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-leaflet": "^5.0.0",
-    "sharp": "^0.34.4"
+    "sharp": "^0.34.4",
+    "supercluster": "^8.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -30,10 +32,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
     "supabase": "^2.62.5",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

@@ -471,6 +471,15 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
   const canEditOpenToTalking = !!(isOwner && currentUserId)
   const isClaimedByYou = isOwner
 
+  const selectedHomeTitle = selectedHome
+    ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''}`.trim() ||
+        selectedHome?.name ||
+        'Home')
+    : ''
+  const selectedHomeAddress = selectedHome
+    ? (selectedHome?.postcode ?? selectedHome?.street ?? 'No address')
+    : ''
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     setCurrentUser(null)
@@ -482,14 +491,8 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
       <header className="bg-white shadow-lg border-b-4 border-orange-500 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <span className="text-6xl">�~</span>
-              <div>
-                <h1 className="text-4xl font-black text-gray-900">
-                  Bitcoin<span className="text-orange-600">Latte</span>
-                </h1>
-                <p className="text-gray-600 font-semibold">Find Bitcoin-Friendly Coffee Shops</p>
-              </div>
+                        <div className="flex items-center gap-4">
+              <h1 className="text-4xl font-black text-gray-900">Nest</h1>
             </div>
             <div className="flex gap-3 items-center">
               {(isAdmin && currentUser) && (
@@ -593,11 +596,9 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
             )}
             <div className="flex-1 w-full h-full">
               <ShopMap
-                shops={[]} // data comes from /api/properties
                 center={mapCenter}
                 zoom={13}
                 onShopClick={(shop) => setSelectedHome(shop)}
-                onMapMove={handleMapMove}
                 currentUserId={currentUserId}
               />
             </div>
@@ -609,7 +610,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
               {/* Header */}
               <div className="flex justify-between items-start mb-4">
                 <h2 className="font-semibold text-lg text-gray-900 leading-tight">
-                  {selectedHome.name}
+                  {selectedHomeTitle}
                 </h2>
                 <button
                   onClick={() => setSelectedHome(null)}
@@ -621,7 +622,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
 
               {/* Address */}
               <p className="text-sm text-gray-700 mb-4">
-                {selectedHome.address}
+                {selectedHomeAddress}
               </p>
 
               {/* Status */}
@@ -1045,3 +1046,4 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
     </div>
   )
 }
+

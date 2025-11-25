@@ -1,17 +1,53 @@
 // src/app/api/properties/route.ts
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  throw new Error('Missing Supabase env vars for /api/properties')
+}
 
-export async function GET() {
-  try {
-    const { data, error } = await supabase
-      .from("properties_public_view")
-      .select(`
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+export async function GET(req: Request) {
+  const url = new URL(req.url)
+
+  const north = parseFloat(url.searchParams.get('north') ?? '')
+  const south = parseFloat(url.searchParams.get('south') ?? '')
+  const east = parseFloat(url.searchParams.get('east') ?? '')
+  const west = parseFloat(url.searchParams.get('west') ?? '')
+
+  const filterOpen = url.searchParams.get('filter_open')
+  const filterForSale = url.searchParams.get('filter_for_sale')
+  const filterForRent = url.searchParams.get('filter_for_rent')
+  const filterClaimed = url.searchParams.get('filter_claimed')
+
+  const LIMIT = 2000
+
+  const hasBounds =
+    !Number.isNaN(north) &&
+    !Number.isNaN(south) &&
+    !Number.isNaN(east) &&
+    !Number.isNaN(west)
+
+  console.log('[API /properties] params', {
+    north,
+    south,
+    east,
+    west,
+    filterOpen,
+    filterForSale,
+    filterForRent,
+    filterClaimed,
+    hasBounds,
+  })
+
+  let query = supabase
+    .from('properties_public_view')
+    .select(
+      `
         id,
         uprn,
         postcode,
@@ -26,17 +62,59 @@ export async function GET() {
         is_for_sale,
         is_for_rent,
         has_recent_activity
-      `)
-      .limit(200);
+        `
+    )
 
-    if (error) {
-      console.error("Supabase error in /api/properties:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ properties: data ?? [] }, { status: 200 });
-  } catch (err: any) {
-    console.error("Unexpected error in /api/properties:", err);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  if (hasBounds) {
+    query = query.gte('lat', south).lte('lat', north).gte('lon', west).lte('lon', east)
   }
+
+  // Filters
+  if (filterOpen === 'true') {
+    query = query.eq('is_open_to_talking', true)
+  }
+
+  if (filterForSale === 'true') {
+    query = query.eq('is_for_sale', true)
+  }
+
+  if (filterForRent === 'true') {
+    query = query.eq('is_for_rent', true)
+  }
+
+  if (filterClaimed === 'claimed') {
+    query = query.eq('is_claimed', true)
+  } else if (filterClaimed === 'unclaimed') {
+    query = query.eq('is_claimed', false)
+  }
+
+  query = query.limit(LIMIT)
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error('[API /properties] Supabase error', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  const truncated = Array.isArray(data) && data.length === LIMIT
+
+  console.log('[API /properties] result', {
+    count: data?.length ?? 0,
+    truncated,
+  })
+
+  return NextResponse.json(
+    {
+      data: data ?? [],
+      truncated,
+    },
+    { status: 200 }
+  )
 }

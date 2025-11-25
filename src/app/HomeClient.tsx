@@ -598,6 +598,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                 zoom={13}
                 onShopClick={(shop) => setSelectedHome(shop)}
                 onMapMove={handleMapMove}
+                currentUserId={currentUserId}
               />
             </div>
           </div>

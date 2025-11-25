@@ -14,7 +14,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-// Custom marker icons for different cryptocurrencies
+// Custom marker icons for different cryptocurrencies (legacy; OSM disabled pre-MVP)
 const createCryptoIcon = (color: string, emoji: string) => {
   return L.divIcon({
     className: 'custom-crypto-marker',
@@ -40,8 +40,8 @@ const createCryptoIcon = (color: string, emoji: string) => {
   })
 }
 
-// User shop icon (amber/yellow)
-const userShopIcon = L.divIcon({
+// Marker variants
+const yourHomeIcon = L.divIcon({
   className: 'custom-user-marker',
   html: `
     <div style="
@@ -56,7 +56,7 @@ const userShopIcon = L.divIcon({
       border: 3px solid white;
       box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     ">
-      🏪
+      H
     </div>
   `,
   iconSize: [32, 32],
@@ -64,42 +64,163 @@ const userShopIcon = L.divIcon({
   popupAnchor: [0, -16],
 })
 
-// Crypto-specific icons
+const forSaleIcon = L.divIcon({
+  className: 'custom-sale-marker',
+  html: `
+    <div style="
+      background-color: #ef4444;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      border: 3px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    ">
+      S
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
+})
+
+const forRentIcon = L.divIcon({
+  className: 'custom-rent-marker',
+  html: `
+    <div style="
+      background-color: #3b82f6;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      border: 3px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    ">
+      R
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
+})
+
+const openHomeIcon = L.divIcon({
+  className: 'custom-open-marker',
+  html: `
+    <div style="
+      background-color: #22c55e;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      border: 3px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    ">
+      O
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
+})
+
+const claimedHomeIcon = L.divIcon({
+  className: 'custom-claimed-marker',
+  html: `
+    <div style="
+      background-color: #a855f7;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      border: 3px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    ">
+      C
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
+})
+
+const unclaimedHomeIcon = L.divIcon({
+  className: 'custom-other-marker',
+  html: `
+    <div style="
+      background-color: #6b7280;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      border: 3px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    ">
+      U
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
+})
+
+// Crypto-specific icons (legacy; kept for completeness)
 const cryptoIcons = {
-  BTC: createCryptoIcon('#f97316', '₿'),
-  BCH: createCryptoIcon('#22c55e', '💚'),
-  LTC: createCryptoIcon('#3b82f6', '🔷'),
-  XMR: createCryptoIcon('#a855f7', '🔒'),
+  BTC: createCryptoIcon('#f97316', 'B'),
+  BCH: createCryptoIcon('#22c55e', 'C'),
+  LTC: createCryptoIcon('#3b82f6', 'L'),
+  XMR: createCryptoIcon('#a855f7', 'M'),
 }
 
-interface Shop {
+export type MapProperty = {
   id: string
-  name: string
-  address: string
-  latitude: number
-  longitude: number
-  crypto_accepted: string[]
-  source?: 'user' | 'osm'
-  shop_type?: string
-  website?: string | null
-  phone?: string | null
-  opening_hours?: string | null
+  uprn: string | null
+  postcode: string | null
+  street: string | null
+  house_number: string | null
+  lat: number
+  lon: number
+  price_estimate: number | null
+  claimed_by_user_id: string | null
+  is_claimed: boolean
+  is_open_to_talking: boolean
+  is_for_sale: boolean
+  is_for_rent: boolean
+  has_recent_activity: boolean
 }
 
-interface OsmShop extends Shop {
+type PropertyStatus = 'for-sale' | 'for-rent' | 'open' | 'claimed' | 'unclaimed'
+
+interface OsmShop extends MapProperty {
   source: 'osm'
   osmId: number
   osmType: string
 }
 
 interface ShopMapProps {
-  shops: Shop[]
+  shops: MapProperty[]
   center?: [number, number]
   zoom?: number
   onShopClick?: (shop: Shop) => void
   onMapMove?: (center: [number, number], bounds: L.LatLngBounds) => void
   onOsmShopsUpdate?: (osmShops: Shop[]) => void
   onLayerChange?: (layers: LayerState) => void
+  currentUserId?: string | null
 }
 
 function MapUpdater({ center }: { center: [number, number] }) {
@@ -175,14 +296,15 @@ export default function ShopMap({
   onShopClick,
   onMapMove,
   onOsmShopsUpdate,
-  onLayerChange
+  onLayerChange,
+  currentUserId
 }: ShopMapProps) {
   const [mounted, setMounted] = useState(false)
   const [osmShops, setOsmShops] = useState<OsmShop[]>([])
   const [loading, setLoading] = useState(false)
   const [currentCenter, setCurrentCenter] = useState<[number, number]>(center)
   // NEST: store homes from /api/properties
-  const [propertyShops, setPropertyShops] = useState<Shop[]>([])
+  const [propertyShops, setPropertyShops] = useState<MapProperty[]>([])
   const abortControllerRef = useRef<AbortController | null>(null)
   const [layers, setLayers] = useState<LayerState>(() => {
     // Load layer preferences from localStorage
@@ -205,6 +327,7 @@ export default function ShopMap({
       userShops: true,
     }
   })
+  const [showOnlyOpenToTalking, setShowOnlyOpenToTalking] = useState(false)
   
   useEffect(() => {
     setMounted(true)
@@ -217,14 +340,22 @@ export default function ShopMap({
         const res = await fetch('/api/properties')
         const json = await res.json()
 
-        const mapped: Shop[] = (json.properties || []).map((p: any) => ({
+        const mapped: MapProperty[] = (json.properties || []).map((p: any) => ({
           id: p.id,
-          name: `${p.house_number} ${p.street}`,
-          address: `${p.house_number} ${p.street}, ${p.postcode}`,
-          latitude: p.lat,
-          longitude: p.lon,
-          crypto_accepted: ['BTC'], // required by type, ignored
-          source: 'user'
+          uprn: p.uprn ?? null,
+          postcode: p.postcode ?? null,
+          street: p.street ?? null,
+          house_number: p.house_number ?? null,
+          lat: Number(p.lat),
+          lon: Number(p.lon),
+          price_estimate:
+            p.price_estimate !== null && p.price_estimate !== undefined ? Number(p.price_estimate) : null,
+          claimed_by_user_id: p.claimed_by_user_id ?? null,
+          is_claimed: !!p.is_claimed,
+          is_open_to_talking: !!p.is_open_to_talking,
+          is_for_sale: !!p.is_for_sale,
+          is_for_rent: !!p.is_for_rent,
+          has_recent_activity: !!p.has_recent_activity,
         }))
 
         setPropertyShops(mapped)
@@ -276,19 +407,44 @@ export default function ShopMap({
   }, [layers, onLayerChange])
 
   // NEST: only show homes from Supabase
+  const derivePropertyStatus = (p: MapProperty): PropertyStatus => {
+    const isClaimed = !!p.is_claimed || !!p.claimed_by_user_id
+    const isOpen = p.is_open_to_talking === true
+    const isForSale = p.is_for_sale === true
+    const isForRent = p.is_for_rent === true
+
+    if (isForSale) return 'for-sale'
+    if (isForRent) return 'for-rent'
+    if (isOpen) return 'open'
+    if (isClaimed) return 'claimed'
+    return 'unclaimed'
+  }
+
   const getVisibleShops = () => {
-    return propertyShops
+    const base = propertyShops
+    return showOnlyOpenToTalking ? base.filter((p) => p.is_open_to_talking === true) : base
   }
 
   // Get appropriate icon for a shop
-  const getShopIcon = (shop: Shop) => {
-    if (shop.source === 'user') {
-      return userShopIcon
+  const getShopIcon = (shop: MapProperty) => {
+    const isClaimedByMe = !!currentUserId && shop.claimed_by_user_id === currentUserId
+    const status = derivePropertyStatus(shop)
+
+    if (isClaimedByMe) return yourHomeIcon
+
+    switch (status) {
+      case 'for-sale':
+        return forSaleIcon
+      case 'for-rent':
+        return forRentIcon
+      case 'open':
+        return openHomeIcon
+      case 'claimed':
+        return claimedHomeIcon
+      case 'unclaimed':
+      default:
+        return unclaimedHomeIcon
     }
-    
-    // For OSM shops, use the first crypto type's icon
-    const firstCrypto = shop.crypto_accepted[0] as keyof typeof cryptoIcons
-    return cryptoIcons[firstCrypto] || cryptoIcons.BTC
   }
 
   const visibleShops = getVisibleShops()
@@ -297,7 +453,7 @@ export default function ShopMap({
     return (
       <div className="w-full h-full bg-stone-200 dark:bg-stone-800 animate-pulse flex items-center justify-center">
         <div className="text-center">
-          <div className="text-4xl mb-2">🗺️</div>
+          <div className="text-4xl mb-2">...</div>
           <p className="text-stone-600 dark:text-stone-400 font-medium">Loading map...</p>
         </div>
       </div>
@@ -323,14 +479,13 @@ export default function ShopMap({
         {visibleShops.map((shop) => (
           <Marker
             key={shop.id}
-            position={[shop.latitude, shop.longitude]}
+            position={[shop.lat, shop.lon]}
             icon={getShopIcon(shop)}
             eventHandlers={{
               click: () => {
                 console.log('[ShopMap] Marker clicked:', {
                   id: shop.id,
-                  name: shop.name,
-                  source: shop.source
+                  title: `${shop.house_number ?? ''} ${shop.street ?? ''}`.trim(),
                 })
                 // Popup will open automatically - no navigation on marker click
                 // Navigation happens via "View Details" button in popup for user shops
@@ -340,10 +495,10 @@ export default function ShopMap({
             <Popup>
               <div className="p-3 min-w-[220px]">
                 <h3 className="font-bold text-lg text-stone-900 mb-1">
-                  {shop.name}
+                  {`${shop.house_number ?? ''} ${shop.street ?? ''}`.trim() || 'Home'}
                 </h3>
                 <p className="text-sm text-stone-600 mb-3">
-                  {shop.address}
+                  {shop.postcode ?? 'No postcode'}
                 </p>
 
                 <button
@@ -353,7 +508,7 @@ export default function ShopMap({
                   }}
                   className="w-full px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium transition-colors"
                 >
-                  View home →
+                  View home
                 </button>
               </div>
             </Popup>
@@ -367,12 +522,25 @@ export default function ShopMap({
       {/* Loading Indicator */}
       {/* NEST: no OSM loading indicator */}
 
-      {/* Shop Count */}
-      <div className="absolute bottom-4 right-4 z-[1000] bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-200">
-        <div className="text-sm">
-          <span className="font-bold text-gray-900">{visibleShops.length}</span>
-          <span className="text-gray-600"> homes visible</span>
+      {/* Shop Count + Filters */}
+      <div className="absolute bottom-4 right-4 z-[1000] flex flex-col gap-2 items-end">
+        <div className="bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-200 w-full text-right">
+          <div className="text-sm">
+            <span className="font-bold text-gray-900">{visibleShops.length}</span>
+            <span className="text-gray-600"> homes visible</span>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowOnlyOpenToTalking((prev) => !prev)}
+          className={`bg-white px-4 py-2 rounded-lg shadow-lg border-2 text-sm font-semibold transition text-left w-full max-w-xs ${
+            showOnlyOpenToTalking ? 'border-green-500 text-green-700' : 'border-gray-200 text-gray-700'
+          }`}
+          aria-pressed={showOnlyOpenToTalking}
+        >
+          Open to talking {showOnlyOpenToTalking ? '✓' : ''}
+          <span className="block text-xs font-normal text-gray-500">Show only homes open to conversations</span>
+        </button>
       </div>
     </div>
   )

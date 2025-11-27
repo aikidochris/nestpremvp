@@ -5,12 +5,11 @@ import type { Database } from '@/lib/database.types'
 export default async function Home() {
   const supabase = await createClient()
   
-  // Fetch approved shops
+  // Fetch initial properties (limited sample to seed UI)
   const { data: shops } = await supabase
-    .from('shops')
-    .select('*')
-    .eq('approved', true)
-    .order('created_at', { ascending: false })
+    .from('properties_public_view')
+    .select('id,uprn,postcode,street,house_number,lat,lon,price_estimate,claimed_by_user_id,is_claimed,is_open_to_talking,is_for_sale,is_for_rent,has_recent_activity')
+    .limit(200)
   
   // Get current user
   const { data: { user } } = await supabase.auth.getUser()

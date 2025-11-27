@@ -6,20 +6,7 @@ import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
 import type L from 'leaflet'
 import { uploadHomeStoryImages } from '@/lib/storage'
-
-interface Shop {
-  id: string
-  name: string
-  address: string
-  latitude: number
-  longitude: number
-  crypto_accepted: string[]
-  source?: 'user' | 'osm'
-  shop_type?: string
-  website?: string | null
-  phone?: string | null
-  opening_hours?: string | null
-}
+import type { MapProperty } from '@/components/Map/ShopMap'
 
 interface User {
   id: string
@@ -27,7 +14,7 @@ interface User {
 }
 
 interface HomeClientProps {
-  shops: Shop[]
+  shops: MapProperty[]
   user: User | null
   isAdmin: boolean
 }
@@ -37,7 +24,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
   const supabase = getSupabaseClient()
   const enableGeolocation = false // keep code for future reintroduction
   const [searchQuery, setSearchQuery] = useState('')
-  const [shops, setShops] = useState<Shop[]>(initialShops)
+  const [shops, setShops] = useState<MapProperty[]>(initialShops)
   const [mapCenter, setMapCenter] = useState<[number, number]>([54.9733, -1.6139]) // Default to Newcastle upon Tyne
   const [isLocating, setIsLocating] = useState(false)
   const [selectedHome, setSelectedHome] = useState<any | null>(null)
@@ -105,26 +92,37 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
 
   const fetchUserShops = useCallback(async (center: [number, number], bounds?: L.LatLngBounds) => {
     try {
-      let url: string
+      const params = new URLSearchParams()
 
       if (bounds) {
         const sw = bounds.getSouthWest()
         const ne = bounds.getNorthEast()
-        url = `/api/shops?swLat=${sw.lat}&swLng=${sw.lng}&neLat=${ne.lat}&neLng=${ne.lng}`
+        params.set('south', sw.lat.toString())
+        params.set('west', sw.lng.toString())
+        params.set('north', ne.lat.toString())
+        params.set('east', ne.lng.toString())
       } else {
-        url = `/api/shops?lat=${center[0]}&lng=${center[1]}&radius=10`
+        const [lat, lon] = center
+        const radiusKm = 10
+        const deltaLat = radiusKm / 111
+        const deltaLon = radiusKm / (111 * Math.cos((lat * Math.PI) / 180) || 1)
+        params.set('south', (lat - deltaLat).toString())
+        params.set('north', (lat + deltaLat).toString())
+        params.set('west', (lon - deltaLon).toString())
+        params.set('east', (lon + deltaLon).toString())
       }
 
+      const url = `/api/properties?${params.toString()}`
       const response = await fetch(url)
 
       if (response.ok) {
         const { data } = await response.json()
         setShops(data || [])
       } else {
-        console.error('Failed to fetch user shops:', response.statusText)
+        console.error('Failed to fetch properties:', response.statusText)
       }
     } catch (error) {
-      console.error('Error fetching user shops:', error)
+      console.error('Error fetching properties:', error)
     }
   }, [])
 
@@ -319,12 +317,24 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
   }, []) // Only run once on mount
 
   const getVisibleShops = useCallback(() => {
-    return shops.map(shop => ({ ...shop, source: 'user' as const }))
+    return shops
   }, [shops])
 
-  const handleShopClick = (shop: Shop) => {
-    router.push(`/shops/${shop.id}`)
+  const handleShopClick = (shop: MapProperty) => {
+    setSelectedHome(shop)
   }
+
+  const buildDisplayLabel = useCallback((property: MapProperty) => {
+    const { house_number, street, postcode } = property
+    if (house_number && street) return `${house_number} ${street}${postcode ? `, ${postcode}` : ''}`
+    if (street) return `${street}${postcode ? `, ${postcode}` : ''}`
+    if (postcode) return postcode
+    return 'Home'
+  }, [])
+
+  const buildAddressLine = useCallback((property: MapProperty) => {
+    return property.postcode ?? property.street ?? 'No address'
+  }, [])
 
   const handleClaimHome = async () => {
     if (!selectedHome) return
@@ -471,6 +481,15 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
   const canEditOpenToTalking = !!(isOwner && currentUserId)
   const isClaimedByYou = isOwner
 
+  const selectedHomeTitle = selectedHome
+    ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''}`.trim() ||
+        selectedHome?.name ||
+        'Home')
+    : ''
+  const selectedHomeAddress = selectedHome
+    ? (selectedHome?.postcode ?? selectedHome?.street ?? 'No address')
+    : ''
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     setCurrentUser(null)
@@ -482,14 +501,8 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
       <header className="bg-white shadow-lg border-b-4 border-orange-500 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <span className="text-6xl">�~</span>
-              <div>
-                <h1 className="text-4xl font-black text-gray-900">
-                  Bitcoin<span className="text-orange-600">Latte</span>
-                </h1>
-                <p className="text-gray-600 font-semibold">Find Bitcoin-Friendly Coffee Shops</p>
-              </div>
+                        <div className="flex items-center gap-4">
+              <h1 className="text-4xl font-black text-gray-900">Nest</h1>
             </div>
             <div className="flex gap-3 items-center">
               {(isAdmin && currentUser) && (
@@ -593,11 +606,9 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
             )}
             <div className="flex-1 w-full h-full">
               <ShopMap
-                shops={[]} // data comes from /api/properties
                 center={mapCenter}
                 zoom={13}
                 onShopClick={(shop) => setSelectedHome(shop)}
-                onMapMove={handleMapMove}
                 currentUserId={currentUserId}
               />
             </div>
@@ -609,7 +620,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
               {/* Header */}
               <div className="flex justify-between items-start mb-4">
                 <h2 className="font-semibold text-lg text-gray-900 leading-tight">
-                  {selectedHome.name}
+                  {selectedHomeTitle}
                 </h2>
                 <button
                   onClick={() => setSelectedHome(null)}
@@ -621,7 +632,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
 
               {/* Address */}
               <p className="text-sm text-gray-700 mb-4">
-                {selectedHome.address}
+                {selectedHomeAddress}
               </p>
 
               {/* Status */}
@@ -899,37 +910,39 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-orange-500 p-6">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-black text-gray-900">
-                �Y"? Shops in View
+                Homes in View
               </h2>
               <div className="text-sm">
                 <span className="font-bold text-gray-900">{visibleShops.length}</span>
-                <span className="text-gray-600"> shops visible</span>
+                <span className="text-gray-600"> homes visible</span>
               </div>
             </div>
 
             {visibleShops.length === 0 ? (
               <div className="text-center py-12">
-                <div className="text-6xl mb-4">�Y"?</div>
-                <p className="text-xl font-bold text-gray-700 mb-2">No shops found</p>
+                <div className="text-6xl mb-4">🏠</div>
+                <p className="text-xl font-bold text-gray-700 mb-2">No homes found</p>
                 <p className="text-gray-600">
-                  Try zooming out or exploring another area to see shops
+                  Try zooming out or exploring another area to see homes
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {visibleShops
                   .sort((a, b) => {
-                    const distA = calculateDistance(mapCenter[0], mapCenter[1], a.latitude, a.longitude)
-                    const distB = calculateDistance(mapCenter[0], mapCenter[1], b.latitude, b.longitude)
+                    const distA = calculateDistance(mapCenter[0], mapCenter[1], a.lat, a.lon)
+                    const distB = calculateDistance(mapCenter[0], mapCenter[1], b.lat, b.lon)
                     return distA - distB
                   })
                   .map((shop) => {
                     const distance = calculateDistance(
                       mapCenter[0],
                       mapCenter[1],
-                      shop.latitude,
-                      shop.longitude
+                      shop.lat,
+                      shop.lon
                     )
+                    const label = buildDisplayLabel(shop)
+                    const address = buildAddressLine(shop)
 
                     return (
                       <div
@@ -939,19 +952,19 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                       >
                         <div className="flex items-start justify-between gap-2 mb-2">
                           <h3 className="font-bold text-lg text-gray-900 flex-1">
-                            {shop.name}
+                            {label}
                           </h3>
                           <span className="text-xs px-2 py-1 rounded-full font-semibold bg-amber-200 text-amber-800">
-                            User
+                            {shop.is_claimed ? 'Claimed' : 'Unclaimed'}
                           </span>
                         </div>
 
                         <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                          {shop.address}
+                          {address}
                         </p>
 
                         <div className="flex items-center gap-2 mb-3 text-xs text-gray-500">
-                          <span>�Y"?</span>
+                          <span>📍</span>
                           <span className="font-semibold">
                             {distance < 1
                               ? `${(distance * 1000).toFixed(0)}m away`
@@ -959,34 +972,11 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                           </span>
                         </div>
 
-                        {shop.shop_type && (
-                          <p className="text-xs text-gray-600 mb-2">
-                            <span className="font-semibold">Type:</span> {shop.shop_type}
-                          </p>
-                        )}
-
-                        {shop.crypto_accepted && shop.crypto_accepted.length > 0 && (
-                          <div className="flex gap-1 flex-wrap mb-3">
-                            {shop.crypto_accepted.map((crypto) => (
-                              <span
-                                key={crypto}
-                                className={`px-2 py-1 text-xs rounded-md font-bold ${
-                                  crypto === 'BTC'
-                                    ? 'bg-orange-200 text-orange-800'
-                                    : crypto === 'BCH'
-                                    ? 'bg-green-200 text-green-800'
-                                    : crypto === 'LTC'
-                                    ? 'bg-blue-200 text-blue-800'
-                                    : crypto === 'XMR'
-                                    ? 'bg-purple-200 text-purple-800'
-                                    : 'bg-gray-200 text-gray-800'
-                                }`}
-                              >
-                                {crypto}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex flex-wrap gap-2 mb-3 text-xs text-gray-600">
+                          {shop.is_for_sale && <span className="px-2 py-1 rounded-md bg-red-100 text-red-700 font-semibold">For sale</span>}
+                          {shop.is_for_rent && <span className="px-2 py-1 rounded-md bg-blue-100 text-blue-700 font-semibold">For rent</span>}
+                          {shop.is_open_to_talking && <span className="px-2 py-1 rounded-md bg-green-100 text-green-700 font-semibold">Open to talking</span>}
+                        </div>
 
                         <button
                           onClick={(e) => {
@@ -995,7 +985,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                           }}
                           className="w-full mt-2 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-bold transition-colors"
                         >
-                          View Details ��'
+                          View home
                         </button>
                       </div>
                     )
@@ -1045,3 +1035,4 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
     </div>
   )
 }
+

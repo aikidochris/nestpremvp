@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import clsx from 'clsx'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import LayerToggle, { LayerState } from './LayerToggle'
+import Supercluster from 'supercluster'
 
 // Fix for default marker icons in Next.js
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -14,31 +15,41 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-// Custom marker icons for different cryptocurrencies (legacy; OSM disabled pre-MVP)
-const createCryptoIcon = (color: string, emoji: string) => {
-  return L.divIcon({
-    className: 'custom-crypto-marker',
-    html: `
-      <div style="
-        background-color: ${color};
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 18px;
-        border: 3px solid white;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      ">
-        ${emoji}
-      </div>
-    `,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-    popupAnchor: [0, -16],
-  })
+export type MapProperty = {
+  id: string
+  uprn: string | null
+  postcode: string | null
+  street: string | null
+  house_number: string | null
+  lat: number
+  lon: number
+  price_estimate: number | null
+  claimed_by_user_id: string | null
+  is_claimed: boolean
+  is_open_to_talking: boolean
+  is_for_sale: boolean
+  is_for_rent: boolean
+  has_recent_activity: boolean
 }
+
+type PropertyStatus = 'for-sale' | 'for-rent' | 'open' | 'claimed' | 'unclaimed'
+
+interface ShopMapProps {
+  center?: [number, number]
+  zoom?: number
+  onShopClick?: (property: MapProperty) => void
+  currentUserId?: string | null
+}
+
+function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
+  const m = useMap()
+  useEffect(() => {
+    onReady(m)
+  }, [m, onReady])
+  return null
+}
+
+const INDIVIDUAL_MARKER_ZOOM = 17
 
 // Marker variants
 const yourHomeIcon = L.divIcon({
@@ -179,256 +190,191 @@ const unclaimedHomeIcon = L.divIcon({
   popupAnchor: [0, -16],
 })
 
-// Crypto-specific icons (legacy; kept for completeness)
-const cryptoIcons = {
-  BTC: createCryptoIcon('#f97316', 'B'),
-  BCH: createCryptoIcon('#22c55e', 'C'),
-  LTC: createCryptoIcon('#3b82f6', 'L'),
-  XMR: createCryptoIcon('#a855f7', 'M'),
-}
-
-export type MapProperty = {
-  id: string
-  uprn: string | null
-  postcode: string | null
-  street: string | null
-  house_number: string | null
-  lat: number
-  lon: number
-  price_estimate: number | null
-  claimed_by_user_id: string | null
-  is_claimed: boolean
-  is_open_to_talking: boolean
-  is_for_sale: boolean
-  is_for_rent: boolean
-  has_recent_activity: boolean
-}
-
-type PropertyStatus = 'for-sale' | 'for-rent' | 'open' | 'claimed' | 'unclaimed'
-
-interface OsmShop extends MapProperty {
-  source: 'osm'
-  osmId: number
-  osmType: string
-}
-
-interface ShopMapProps {
-  shops: MapProperty[]
-  center?: [number, number]
-  zoom?: number
-  onShopClick?: (shop: Shop) => void
-  onMapMove?: (center: [number, number], bounds: L.LatLngBounds) => void
-  onOsmShopsUpdate?: (osmShops: Shop[]) => void
-  onLayerChange?: (layers: LayerState) => void
-  currentUserId?: string | null
-}
-
-function MapUpdater({ center }: { center: [number, number] }) {
-  const map = useMap()
-  
-  useEffect(() => {
-    map.setView(center, map.getZoom())
-  }, [center, map])
-  
-  return null
-}
-
-// Component to handle map movement events with debouncing
-function MapEventHandler({
-  onMapMove
-}: {
-  onMapMove?: (center: [number, number], bounds: L.LatLngBounds) => void
-}) {
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const hasInitializedRef = useRef(false)
-  
-  const map = useMapEvents({
-    moveend: () => {
-      console.log('[MapEventHandler] moveend event fired')
-      
-      // Trigger immediately on first load, then debounce subsequent moves
-      if (!hasInitializedRef.current) {
-        hasInitializedRef.current = true
-        const center = map.getCenter()
-        const bounds = map.getBounds()
-        console.log('[MapEventHandler] Initial load - triggering immediately:', {
-          center: [center.lat, center.lng],
-          bounds: bounds.toBBoxString()
-        })
-        onMapMove?.([center.lat, center.lng], bounds)
-        return
-      }
-      
-      // Clear existing timer
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current)
-      }
-      
-      // Set new timer for debounced callback
-      debounceTimerRef.current = setTimeout(() => {
-        const center = map.getCenter()
-        const bounds = map.getBounds()
-        console.log('[MapEventHandler] Debounced callback executing:', {
-          center: [center.lat, center.lng],
-          bounds: bounds.toBBoxString()
-        })
-        onMapMove?.([center.lat, center.lng], bounds)
-      }, 500) // 500ms debounce
-    }
+const clusterIcon = (count: number) =>
+  L.divIcon({
+    html: `<div style="background:#f97316;color:white;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);">${count}</div>`,
+    className: 'custom-cluster-marker',
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
   })
-  
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current)
-      }
-    }
-  }, [])
-  
-  return null
+
+function buildDisplayLabel(property: MapProperty) {
+  const { house_number, street, postcode } = property
+  if (house_number && street) {
+    return `${house_number} ${street}${postcode ? `, ${postcode}` : ''}`
+  }
+  if (street) {
+    return `${street}${postcode ? `, ${postcode}` : ''}`
+  }
+  if (postcode) {
+    return postcode
+  }
+  return 'Home'
+}
+
+function derivePropertyStatus(p: MapProperty): PropertyStatus {
+  if (p.is_for_sale) return 'for-sale'
+  if (p.is_for_rent) return 'for-rent'
+  if (p.is_open_to_talking) return 'open'
+  if (p.is_claimed) return 'claimed'
+  return 'unclaimed'
 }
 
 export default function ShopMap({
-  shops,
-  center = [37.7749, -122.4194], // Default to San Francisco
-  zoom = 13,
+  center = [54.9749, -1.6103],
+  zoom = 14,
   onShopClick,
-  onMapMove,
-  onOsmShopsUpdate,
-  onLayerChange,
-  currentUserId
+  currentUserId,
 }: ShopMapProps) {
-  const [mounted, setMounted] = useState(false)
-  const [osmShops, setOsmShops] = useState<OsmShop[]>([])
-  const [loading, setLoading] = useState(false)
-  const [currentCenter, setCurrentCenter] = useState<[number, number]>(center)
-  // NEST: store homes from /api/properties
-  const [propertyShops, setPropertyShops] = useState<MapProperty[]>([])
-  const abortControllerRef = useRef<AbortController | null>(null)
-  const [layers, setLayers] = useState<LayerState>(() => {
-    // Load layer preferences from localStorage
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('mapLayers')
-      if (saved) {
-        try {
-          return JSON.parse(saved)
-        } catch (e) {
-          console.error('Failed to parse saved layers:', e)
+  console.log('[ShopMap] render')
+  const [map, setMap] = useState<L.Map | null>(null)
+  const [properties, setProperties] = useState<MapProperty[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [truncated, setTruncated] = useState(false)
+  const [visibleCount, setVisibleCount] = useState<number | null>(null)
+  const [totalCount, setTotalCount] = useState<number | null>(null)
+
+  const [filterOpen, setFilterOpen] = useState<boolean>(false)
+  const [filterForSale, setFilterForSale] = useState<boolean>(false)
+  const [filterForRent, setFilterForRent] = useState<boolean>(false)
+  const [filterClaimed, setFilterClaimed] = useState<'all' | 'claimed' | 'unclaimed'>('all')
+
+  const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
+  const hasFitBounds = useRef(false)
+
+  const propertyMap = useMemo(() => {
+    const m = new Map<string, MapProperty>()
+    properties.forEach((p) => m.set(p.id, p))
+    return m
+  }, [properties])
+
+  const geojsonPoints = useMemo(
+    () =>
+      properties.map((p) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [p.lon, p.lat],
+        },
+        properties: {
+          id: p.id,
+          is_claimed: p.is_claimed,
+          is_open_to_talking: p.is_open_to_talking,
+          is_for_sale: p.is_for_sale,
+          is_for_rent: p.is_for_rent,
+          has_recent_activity: p.has_recent_activity,
+        },
+      })),
+    [properties]
+  )
+
+  const clusterIndex = useMemo(() => {
+    const index = new Supercluster({ radius: 30, maxZoom: 19, minZoom: 0 })
+    return index.load(geojsonPoints as any)
+  }, [geojsonPoints])
+
+  const zoomLevel = map ? map.getZoom() : 0
+
+  const clusters = useMemo(() => {
+    if (!map || zoomLevel >= INDIVIDUAL_MARKER_ZOOM) return []
+
+    const bounds = map.getBounds()
+    const north = bounds.getNorth()
+    const south = bounds.getSouth()
+    const east = bounds.getEast()
+    const west = bounds.getWest()
+
+    return clusterIndex.getClusters([west, south, east, north], zoomLevel)
+  }, [clusterIndex, map, viewport, zoomLevel])
+
+  useEffect(() => {
+    if (!map) {
+      console.log('[ShopMap] map not ready yet')
+      return
+    }
+
+    let cancelled = false
+
+    const fetchForBounds = async () => {
+      if (!map) return
+
+      const bounds = map.getBounds()
+      const north = bounds.getNorth()
+      const south = bounds.getSouth()
+      const east = bounds.getEast()
+      const west = bounds.getWest()
+
+      setViewport({ north, south, east, west, zoom: map.getZoom() })
+
+      const params = new URLSearchParams()
+      params.set('north', north.toString())
+      params.set('south', south.toString())
+      params.set('east', east.toString())
+      params.set('west', west.toString())
+      params.set('filter_open', String(filterOpen))
+      params.set('filter_for_sale', String(filterForSale))
+      params.set('filter_for_rent', String(filterForRent))
+      params.set('filter_claimed', filterClaimed)
+
+      const url = `/api/properties?${params.toString()}`
+      console.log('[ShopMap] fetching properties', url)
+
+      try {
+        setIsLoading(true)
+        const res = await fetch(url)
+        const json = await res.json()
+
+        console.log('[ShopMap] /api/properties response', {
+          status: res.status,
+          count: Array.isArray(json.data) ? json.data.length : 0,
+          truncated: json.truncated,
+        })
+
+        if (!res.ok || cancelled) {
+          if (!res.ok) console.error('[ShopMap] error from /api/properties', json)
+          return
+        }
+
+        setProperties(json.data ?? [])
+        setVisibleCount(Array.isArray(json.data) ? json.data.length : null)
+        setTotalCount(typeof json.totalCount === 'number' ? json.totalCount : null)
+        setTruncated(Boolean(json.truncated))
+
+        if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
+          const bounds = L.latLngBounds(json.data.map((p: MapProperty) => [p.lat, p.lon] as [number, number]))
+          map.fitBounds(bounds)
+          hasFitBounds.current = true
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[ShopMap] network error fetching properties', err)
+          setProperties([])
+          setTruncated(false)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
         }
       }
     }
-    // Default: all layers enabled
-    return {
-      BTC: true,
-      BCH: true,
-      LTC: true,
-      XMR: true,
-      userShops: true,
-    }
-  })
-  const [showOnlyOpenToTalking, setShowOnlyOpenToTalking] = useState(false)
-  
-  useEffect(() => {
-    setMounted(true)
-  }, [])
 
-  // NEST: fetch Supabase homes
-  useEffect(() => {
-    const fetchProperties = async () => {
-      try {
-        const res = await fetch('/api/properties')
-        const json = await res.json()
+    // initial fetch
+    fetchForBounds()
 
-        const mapped: MapProperty[] = (json.properties || []).map((p: any) => ({
-          id: p.id,
-          uprn: p.uprn ?? null,
-          postcode: p.postcode ?? null,
-          street: p.street ?? null,
-          house_number: p.house_number ?? null,
-          lat: Number(p.lat),
-          lon: Number(p.lon),
-          price_estimate:
-            p.price_estimate !== null && p.price_estimate !== undefined ? Number(p.price_estimate) : null,
-          claimed_by_user_id: p.claimed_by_user_id ?? null,
-          is_claimed: !!p.is_claimed,
-          is_open_to_talking: !!p.is_open_to_talking,
-          is_for_sale: !!p.is_for_sale,
-          is_for_rent: !!p.is_for_rent,
-          has_recent_activity: !!p.has_recent_activity,
-        }))
+    // refetch on move/zoom
+    map.on('moveend', fetchForBounds)
+    map.on('zoomend', fetchForBounds)
 
-        setPropertyShops(mapped)
-      } catch (err) {
-        console.error('Failed to fetch properties', err)
-      }
-    }
-
-    fetchProperties()
-  }, [])
-
-  // NEST: OSM disabled for pre-MVP
-  const fetchOsmShops = useCallback(async (_bounds: L.LatLngBounds) => {
-    return
-  }, [])
-
-  // Handle map movement
-  const handleMapMove = useCallback((newCenter: [number, number], bounds: L.LatLngBounds) => {
-    console.log('[ShopMap] handleMapMove called:', { newCenter, bounds: bounds.toBBoxString() })
-    setCurrentCenter(newCenter)
-    fetchOsmShops(bounds)
-    onMapMove?.(newCenter, bounds)
-  }, [fetchOsmShops, onMapMove])
-
-  // Initial fetch on mount - need to get bounds from map
-  useEffect(() => {
-    if (!mounted) return
-    // We can't fetch on mount without bounds, so we'll wait for the first moveend event
-    // which fires automatically when the map initializes
-  }, [mounted])
-
-  // Cleanup: abort any pending requests on unmount
-  useEffect(() => {
     return () => {
-      if (abortControllerRef.current) {
-        console.log('[ShopMap] Component unmounting - aborting pending request')
-        abortControllerRef.current.abort()
-      }
+      cancelled = true
+      map.off('moveend', fetchForBounds)
+      map.off('zoomend', fetchForBounds)
     }
-  }, [])
+  }, [map, filterOpen, filterForSale, filterForRent, filterClaimed])
 
-  // Save layer preferences to localStorage and notify parent
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('mapLayers', JSON.stringify(layers))
-    }
-    // Notify parent component of layer changes
-    onLayerChange?.(layers)
-  }, [layers, onLayerChange])
-
-  // NEST: only show homes from Supabase
-  const derivePropertyStatus = (p: MapProperty): PropertyStatus => {
-    const isClaimed = !!p.is_claimed || !!p.claimed_by_user_id
-    const isOpen = p.is_open_to_talking === true
-    const isForSale = p.is_for_sale === true
-    const isForRent = p.is_for_rent === true
-
-    if (isForSale) return 'for-sale'
-    if (isForRent) return 'for-rent'
-    if (isOpen) return 'open'
-    if (isClaimed) return 'claimed'
-    return 'unclaimed'
-  }
-
-  const getVisibleShops = () => {
-    const base = propertyShops
-    return showOnlyOpenToTalking ? base.filter((p) => p.is_open_to_talking === true) : base
-  }
-
-  // Get appropriate icon for a shop
-  const getShopIcon = (shop: MapProperty) => {
-    const isClaimedByMe = !!currentUserId && shop.claimed_by_user_id === currentUserId
-    const status = derivePropertyStatus(shop)
+  const getShopIcon = (property: MapProperty) => {
+    const isClaimedByMe = !!currentUserId && property.claimed_by_user_id === currentUserId
+    const status = derivePropertyStatus(property)
 
     if (isClaimedByMe) return yourHomeIcon
 
@@ -447,21 +393,154 @@ export default function ShopMap({
     }
   }
 
-  const visibleShops = getVisibleShops()
-  
-  if (!mounted) {
+  const handleClusterClick = useCallback(
+    (cluster: any) => {
+      if (!map) return
+      const expansionZoom = clusterIndex.getClusterExpansionZoom(cluster.id)
+      const [lon, lat] = cluster.geometry.coordinates
+      map.setView([lat, lon], expansionZoom)
+    },
+    [clusterIndex, map]
+  )
+
+  const handlePointClick = useCallback(
+    (propertyId: string) => {
+      const property = propertyMap.get(propertyId)
+      if (!property) return
+      onShopClick?.(property)
+    },
+    [onShopClick, propertyMap]
+  )
+
+  const renderPropertyMarker = (property: MapProperty) => {
+    const label = buildDisplayLabel(property)
+    const address = property.postcode || property.street || 'No postcode'
+
     return (
-      <div className="w-full h-full bg-stone-200 dark:bg-stone-800 animate-pulse flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-4xl mb-2">...</div>
-          <p className="text-stone-600 dark:text-stone-400 font-medium">Loading map...</p>
-        </div>
-      </div>
+      <Marker
+        key={property.id}
+        position={[property.lat, property.lon]}
+        icon={getShopIcon(property)}
+        eventHandlers={{
+          click: () => handlePointClick(property.id),
+        }}
+      >
+        <Popup>
+          <div className="p-3 min-w-[220px]">
+            <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
+            <p className="text-sm text-stone-600 mb-3">{address}</p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handlePointClick(property.id)
+              }}
+              className="w-full px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium transition-colors"
+            >
+              View home
+            </button>
+          </div>
+        </Popup>
+      </Marker>
     )
   }
-  
+
+  const renderClusterOrMarker = (cluster: any) => {
+    const [lon, lat] = cluster.geometry.coordinates
+    const isCluster = cluster.properties.cluster
+
+    if (isCluster) {
+      const count = cluster.properties.point_count
+      return (
+        <Marker
+          key={`cluster-${cluster.id}`}
+          position={[lat, lon]}
+          icon={clusterIcon(count)}
+          eventHandlers={{
+            click: () => handleClusterClick(cluster),
+          }}
+        />
+      )
+    }
+
+    const property = propertyMap.get(cluster.properties.id)
+    if (!property) return null
+
+    return renderPropertyMarker(property)
+  }
+
   return (
     <div className="relative w-full h-full">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+        <span className="font-medium">Filter:</span>
+
+        <button
+          type="button"
+          onClick={() => setFilterOpen((prev) => !prev)}
+          className={clsx(
+            'rounded-full border px-3 py-1 transition-colors',
+            filterOpen ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600'
+          )}
+        >
+          Open to conversations
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterForSale((prev) => !prev)}
+          className={clsx(
+            'rounded-full border px-3 py-1 transition-colors',
+            filterForSale ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-600'
+          )}
+        >
+          For sale
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterForRent((prev) => !prev)}
+          className={clsx(
+            'rounded-full border px-3 py-1 transition-colors',
+            filterForRent ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
+          )}
+        >
+          For rent
+        </button>
+
+        <div className="ml-auto flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Claimed:</span>
+          <select
+            value={filterClaimed}
+            onChange={(e) => setFilterClaimed(e.target.value as 'all' | 'claimed' | 'unclaimed')}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+          >
+            <option value="all">All</option>
+            <option value="claimed">Claimed</option>
+            <option value="unclaimed">Unclaimed</option>
+          </select>
+        </div>
+      </div>
+
+      {(totalCount != null || visibleCount != null) && (
+        <div className="mb-1 text-[11px] text-slate-500">
+          {totalCount != null ? (
+            <>
+              <span className="font-medium text-slate-700">{totalCount.toLocaleString('en-GB')} homes</span> in this area
+            </>
+          ) : visibleCount != null ? (
+            <>
+              <span className="font-medium text-slate-700">{visibleCount.toLocaleString('en-GB')} homes</span> in this area
+            </>
+          ) : null}
+          {truncated && (
+            <span className="ml-1 text-slate-400">
+              (showing first {visibleCount?.toLocaleString('en-GB') ?? '...'} – zoom in or refine filters)
+            </span>
+          )}
+        </div>
+      )}
+
+      {isLoading && <div className="mb-2 text-[11px] text-slate-500">Updating homes...</div>}
+
       <MapContainer
         center={center}
         zoom={zoom}
@@ -469,79 +548,16 @@ export default function ShopMap({
         scrollWheelZoom={true}
         style={{ width: '100%', height: '100%', minHeight: '500px' }}
       >
+        <MapInstanceCatcher onReady={setMap} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapUpdater center={center} />
-        <MapEventHandler onMapMove={handleMapMove} />
-        
-        {visibleShops.map((shop) => (
-          <Marker
-            key={shop.id}
-            position={[shop.lat, shop.lon]}
-            icon={getShopIcon(shop)}
-            eventHandlers={{
-              click: () => {
-                console.log('[ShopMap] Marker clicked:', {
-                  id: shop.id,
-                  title: `${shop.house_number ?? ''} ${shop.street ?? ''}`.trim(),
-                })
-                // Popup will open automatically - no navigation on marker click
-                // Navigation happens via "View Details" button in popup for user shops
-              }
-            }}
-          >
-            <Popup>
-              <div className="p-3 min-w-[220px]">
-                <h3 className="font-bold text-lg text-stone-900 mb-1">
-                  {`${shop.house_number ?? ''} ${shop.street ?? ''}`.trim() || 'Home'}
-                </h3>
-                <p className="text-sm text-stone-600 mb-3">
-                  {shop.postcode ?? 'No postcode'}
-                </p>
 
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onShopClick?.(shop)
-                  }}
-                  className="w-full px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium transition-colors"
-                >
-                  View home
-                </button>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+        {map && zoomLevel >= INDIVIDUAL_MARKER_ZOOM
+          ? properties.map((property) => renderPropertyMarker(property))
+          : clusters.map((cluster: any) => renderClusterOrMarker(cluster))}
       </MapContainer>
-
-      {/* Layer Toggle Control */}
-      {/* NEST: no crypto layers */}
-
-      {/* Loading Indicator */}
-      {/* NEST: no OSM loading indicator */}
-
-      {/* Shop Count + Filters */}
-      <div className="absolute bottom-4 right-4 z-[1000] flex flex-col gap-2 items-end">
-        <div className="bg-white px-4 py-2 rounded-lg shadow-lg border-2 border-gray-200 w-full text-right">
-          <div className="text-sm">
-            <span className="font-bold text-gray-900">{visibleShops.length}</span>
-            <span className="text-gray-600"> homes visible</span>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowOnlyOpenToTalking((prev) => !prev)}
-          className={`bg-white px-4 py-2 rounded-lg shadow-lg border-2 text-sm font-semibold transition text-left w-full max-w-xs ${
-            showOnlyOpenToTalking ? 'border-green-500 text-green-700' : 'border-gray-200 text-gray-700'
-          }`}
-          aria-pressed={showOnlyOpenToTalking}
-        >
-          Open to talking {showOnlyOpenToTalking ? '✓' : ''}
-          <span className="block text-xs font-normal text-gray-500">Show only homes open to conversations</span>
-        </button>
-      </div>
     </div>
   )
 }

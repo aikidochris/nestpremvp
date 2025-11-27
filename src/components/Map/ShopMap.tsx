@@ -1,5 +1,6 @@
 'use client'
 
+import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -47,6 +48,8 @@ function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
   }, [m, onReady])
   return null
 }
+
+const INDIVIDUAL_MARKER_ZOOM = 17
 
 // Marker variants
 const yourHomeIcon = L.divIcon({
@@ -228,6 +231,8 @@ export default function ShopMap({
   const [properties, setProperties] = useState<MapProperty[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [truncated, setTruncated] = useState(false)
+  const [visibleCount, setVisibleCount] = useState<number | null>(null)
+  const [totalCount, setTotalCount] = useState<number | null>(null)
 
   const [filterOpen, setFilterOpen] = useState<boolean>(false)
   const [filterForSale, setFilterForSale] = useState<boolean>(false)
@@ -264,14 +269,23 @@ export default function ShopMap({
   )
 
   const clusterIndex = useMemo(() => {
-    const index = new Supercluster({ radius: 60, maxZoom: 19, minZoom: 0 })
+    const index = new Supercluster({ radius: 30, maxZoom: 19, minZoom: 0 })
     return index.load(geojsonPoints as any)
   }, [geojsonPoints])
 
+  const zoomLevel = map ? map.getZoom() : 0
+
   const clusters = useMemo(() => {
-    if (!viewport) return []
-    return clusterIndex.getClusters([viewport.west, viewport.south, viewport.east, viewport.north], Math.round(viewport.zoom))
-  }, [clusterIndex, viewport])
+    if (!map || zoomLevel >= INDIVIDUAL_MARKER_ZOOM) return []
+
+    const bounds = map.getBounds()
+    const north = bounds.getNorth()
+    const south = bounds.getSouth()
+    const east = bounds.getEast()
+    const west = bounds.getWest()
+
+    return clusterIndex.getClusters([west, south, east, north], zoomLevel)
+  }, [clusterIndex, map, viewport, zoomLevel])
 
   useEffect(() => {
     if (!map) {
@@ -300,9 +314,7 @@ export default function ShopMap({
       params.set('filter_open', String(filterOpen))
       params.set('filter_for_sale', String(filterForSale))
       params.set('filter_for_rent', String(filterForRent))
-      if (filterClaimed !== 'all') {
-        params.set('filter_claimed', filterClaimed)
-      }
+      params.set('filter_claimed', filterClaimed)
 
       const url = `/api/properties?${params.toString()}`
       console.log('[ShopMap] fetching properties', url)
@@ -324,6 +336,8 @@ export default function ShopMap({
         }
 
         setProperties(json.data ?? [])
+        setVisibleCount(Array.isArray(json.data) ? json.data.length : null)
+        setTotalCount(typeof json.totalCount === 'number' ? json.totalCount : null)
         setTruncated(Boolean(json.truncated))
 
         if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
@@ -398,27 +412,7 @@ export default function ShopMap({
     [onShopClick, propertyMap]
   )
 
-  const renderClusterOrMarker = (cluster: any) => {
-    const [lon, lat] = cluster.geometry.coordinates
-    const isCluster = cluster.properties.cluster
-
-    if (isCluster) {
-      const count = cluster.properties.point_count
-      return (
-        <Marker
-          key={`cluster-${cluster.id}`}
-          position={[lat, lon]}
-          icon={clusterIcon(count)}
-          eventHandlers={{
-            click: () => handleClusterClick(cluster),
-          }}
-        />
-      )
-    }
-
-    const property = propertyMap.get(cluster.properties.id)
-    if (!property) return null
-
+  const renderPropertyMarker = (property: MapProperty) => {
     const label = buildDisplayLabel(property)
     const address = property.postcode || property.street || 'No postcode'
 
@@ -450,43 +444,74 @@ export default function ShopMap({
     )
   }
 
+  const renderClusterOrMarker = (cluster: any) => {
+    const [lon, lat] = cluster.geometry.coordinates
+    const isCluster = cluster.properties.cluster
+
+    if (isCluster) {
+      const count = cluster.properties.point_count
+      return (
+        <Marker
+          key={`cluster-${cluster.id}`}
+          position={[lat, lon]}
+          icon={clusterIcon(count)}
+          eventHandlers={{
+            click: () => handleClusterClick(cluster),
+          }}
+        />
+      )
+    }
+
+    const property = propertyMap.get(cluster.properties.id)
+    if (!property) return null
+
+    return renderPropertyMarker(property)
+  }
+
   return (
     <div className="relative w-full h-full">
-      {/* Filters */}
-      <div className="absolute top-4 left-4 z-[1100] flex flex-wrap gap-2 bg-white/90 backdrop-blur px-3 py-2 rounded-lg border border-stone-200 shadow-sm">
-        <label className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-          <input
-            type="checkbox"
-            checked={filterOpen}
-            onChange={(e) => setFilterOpen(e.target.checked)}
-            className="h-4 w-4 rounded border-stone-300"
-          />
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+        <span className="font-medium">Filter:</span>
+
+        <button
+          type="button"
+          onClick={() => setFilterOpen((prev) => !prev)}
+          className={clsx(
+            'rounded-full border px-3 py-1 transition-colors',
+            filterOpen ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600'
+          )}
+        >
           Open to conversations
-        </label>
-        <label className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-          <input
-            type="checkbox"
-            checked={filterForSale}
-            onChange={(e) => setFilterForSale(e.target.checked)}
-            className="h-4 w-4 rounded border-stone-300"
-          />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterForSale((prev) => !prev)}
+          className={clsx(
+            'rounded-full border px-3 py-1 transition-colors',
+            filterForSale ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-600'
+          )}
+        >
           For sale
-        </label>
-        <label className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-          <input
-            type="checkbox"
-            checked={filterForRent}
-            onChange={(e) => setFilterForRent(e.target.checked)}
-            className="h-4 w-4 rounded border-stone-300"
-          />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterForRent((prev) => !prev)}
+          className={clsx(
+            'rounded-full border px-3 py-1 transition-colors',
+            filterForRent ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
+          )}
+        >
           For rent
-        </label>
-        <div className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-          Claimed:
+        </button>
+
+        <div className="ml-auto flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Claimed:</span>
           <select
             value={filterClaimed}
             onChange={(e) => setFilterClaimed(e.target.value as 'all' | 'claimed' | 'unclaimed')}
-            className="border border-stone-300 rounded px-2 py-1 text-sm"
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
           >
             <option value="all">All</option>
             <option value="claimed">Claimed</option>
@@ -495,17 +520,26 @@ export default function ShopMap({
         </div>
       </div>
 
-      {isLoading && (
-        <div className="absolute top-4 right-4 z-[1100] bg-white/90 backdrop-blur px-3 py-2 rounded-lg shadow border border-stone-200 text-sm text-stone-700">
-          Updating homes…
+      {(totalCount != null || visibleCount != null) && (
+        <div className="mb-1 text-[11px] text-slate-500">
+          {totalCount != null ? (
+            <>
+              <span className="font-medium text-slate-700">{totalCount.toLocaleString('en-GB')} homes</span> in this area
+            </>
+          ) : visibleCount != null ? (
+            <>
+              <span className="font-medium text-slate-700">{visibleCount.toLocaleString('en-GB')} homes</span> in this area
+            </>
+          ) : null}
+          {truncated && (
+            <span className="ml-1 text-slate-400">
+              (showing first {visibleCount?.toLocaleString('en-GB') ?? '...'} – zoom in or refine filters)
+            </span>
+          )}
         </div>
       )}
 
-      {truncated && (
-        <div className="absolute top-16 right-4 z-[1100] bg-white/90 backdrop-blur px-3 py-2 rounded-lg shadow border border-stone-200 text-xs text-stone-700 max-w-xs">
-          Showing up to 2,000 homes in this area. Zoom in or use filters to see more.
-        </div>
-      )}
+      {isLoading && <div className="mb-2 text-[11px] text-slate-500">Updating homes...</div>}
 
       <MapContainer
         center={center}
@@ -520,7 +554,9 @@ export default function ShopMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {clusters.map((cluster: any) => renderClusterOrMarker(cluster))}
+        {map && zoomLevel >= INDIVIDUAL_MARKER_ZOOM
+          ? properties.map((property) => renderPropertyMarker(property))
+          : clusters.map((cluster: any) => renderClusterOrMarker(cluster))}
       </MapContainer>
     </div>
   )

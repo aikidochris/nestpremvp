@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet'
+import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
@@ -38,6 +38,14 @@ interface ShopMapProps {
   zoom?: number
   onShopClick?: (property: MapProperty) => void
   currentUserId?: string | null
+}
+
+function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
+  const m = useMap()
+  useEffect(() => {
+    onReady(m)
+  }, [m, onReady])
+  return null
 }
 
 // Marker variants
@@ -210,23 +218,24 @@ function derivePropertyStatus(p: MapProperty): PropertyStatus {
 }
 
 export default function ShopMap({
-  center = [37.7749, -122.4194],
-  zoom = 13,
+  center = [54.9749, -1.6103],
+  zoom = 14,
   onShopClick,
   currentUserId,
 }: ShopMapProps) {
+  console.log('[ShopMap] render')
   const [map, setMap] = useState<L.Map | null>(null)
   const [properties, setProperties] = useState<MapProperty[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [truncated, setTruncated] = useState(false)
 
-  const [filterOpen, setFilterOpen] = useState(true)
-  const [filterForSale, setFilterForSale] = useState(false)
-  const [filterForRent, setFilterForRent] = useState(false)
+  const [filterOpen, setFilterOpen] = useState<boolean>(false)
+  const [filterForSale, setFilterForSale] = useState<boolean>(false)
+  const [filterForRent, setFilterForRent] = useState<boolean>(false)
   const [filterClaimed, setFilterClaimed] = useState<'all' | 'claimed' | 'unclaimed'>('all')
 
   const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
-  const fetchTimeout = useRef<NodeJS.Timeout | null>(null)
+  const hasFitBounds = useRef(false)
 
   const propertyMap = useMemo(() => {
     const m = new Map<string, MapProperty>()
@@ -264,81 +273,90 @@ export default function ShopMap({
     return clusterIndex.getClusters([viewport.west, viewport.south, viewport.east, viewport.north], Math.round(viewport.zoom))
   }, [clusterIndex, viewport])
 
-  const fetchProperties = useCallback(async () => {
-    if (!map) return
-
-    const bounds = map.getBounds()
-    const north = bounds.getNorth()
-    const south = bounds.getSouth()
-    const east = bounds.getEast()
-    const west = bounds.getWest()
-
-    setViewport({ north, south, east, west, zoom: map.getZoom() })
-
-    const params = new URLSearchParams()
-    params.set('north', String(north))
-    params.set('south', String(south))
-    params.set('east', String(east))
-    params.set('west', String(west))
-    params.set('filter_open', String(filterOpen))
-    params.set('filter_for_sale', String(filterForSale))
-    params.set('filter_for_rent', String(filterForRent))
-    if (filterClaimed !== 'all') {
-      params.set('filter_claimed', filterClaimed)
-    }
-
-    setIsLoading(true)
-    try {
-      const res = await fetch(`/api/properties?${params.toString()}`)
-      if (!res.ok) {
-        console.error('Failed to fetch properties', res.statusText)
-        return
-      }
-      const json = await res.json()
-      setProperties(json.data ?? [])
-      setTruncated(Boolean(json.truncated))
-    } catch (err) {
-      console.error('Error fetching properties', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [filterClaimed, filterForRent, filterForSale, filterOpen, map])
-
-  const scheduleFetch = useCallback(() => {
-    if (fetchTimeout.current) {
-      clearTimeout(fetchTimeout.current)
-    }
-    fetchTimeout.current = setTimeout(() => {
-      fetchProperties()
-    }, 250)
-  }, [fetchProperties])
-
-  // Attach map move/zoom events
   useEffect(() => {
-    if (!map) return
-
-    const handleUpdate = () => {
-      scheduleFetch()
+    if (!map) {
+      console.log('[ShopMap] map not ready yet')
+      return
     }
 
-    map.on('moveend', handleUpdate)
-    map.on('zoomend', handleUpdate)
+    let cancelled = false
+
+    const fetchForBounds = async () => {
+      if (!map) return
+
+      const bounds = map.getBounds()
+      const north = bounds.getNorth()
+      const south = bounds.getSouth()
+      const east = bounds.getEast()
+      const west = bounds.getWest()
+
+      setViewport({ north, south, east, west, zoom: map.getZoom() })
+
+      const params = new URLSearchParams()
+      params.set('north', north.toString())
+      params.set('south', south.toString())
+      params.set('east', east.toString())
+      params.set('west', west.toString())
+      params.set('filter_open', String(filterOpen))
+      params.set('filter_for_sale', String(filterForSale))
+      params.set('filter_for_rent', String(filterForRent))
+      if (filterClaimed !== 'all') {
+        params.set('filter_claimed', filterClaimed)
+      }
+
+      const url = `/api/properties?${params.toString()}`
+      console.log('[ShopMap] fetching properties', url)
+
+      try {
+        setIsLoading(true)
+        const res = await fetch(url)
+        const json = await res.json()
+
+        console.log('[ShopMap] /api/properties response', {
+          status: res.status,
+          count: Array.isArray(json.data) ? json.data.length : 0,
+          truncated: json.truncated,
+        })
+
+        if (!res.ok || cancelled) {
+          if (!res.ok) console.error('[ShopMap] error from /api/properties', json)
+          return
+        }
+
+        setProperties(json.data ?? [])
+        setTruncated(Boolean(json.truncated))
+
+        if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
+          const bounds = L.latLngBounds(json.data.map((p: MapProperty) => [p.lat, p.lon] as [number, number]))
+          map.fitBounds(bounds)
+          hasFitBounds.current = true
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[ShopMap] network error fetching properties', err)
+          setProperties([])
+          setTruncated(false)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      }
+    }
 
     // initial fetch
-    scheduleFetch()
+    fetchForBounds()
+
+    // refetch on move/zoom
+    map.on('moveend', fetchForBounds)
+    map.on('zoomend', fetchForBounds)
 
     return () => {
-      map.off('moveend', handleUpdate)
-      map.off('zoomend', handleUpdate)
+      cancelled = true
+      map.off('moveend', fetchForBounds)
+      map.off('zoomend', fetchForBounds)
     }
-  }, [map, scheduleFetch])
-
-  // Cleanup debounce timer on unmount
-  useEffect(() => {
-    return () => {
-      if (fetchTimeout.current) clearTimeout(fetchTimeout.current)
-    }
-  }, [])
+  }, [map, filterOpen, filterForSale, filterForRent, filterClaimed])
 
   const getShopIcon = (property: MapProperty) => {
     const isClaimedByMe = !!currentUserId && property.claimed_by_user_id === currentUserId
@@ -495,8 +513,8 @@ export default function ShopMap({
         className="w-full h-full"
         scrollWheelZoom={true}
         style={{ width: '100%', height: '100%', minHeight: '500px' }}
-        whenCreated={(instance) => setMap(instance)}
       >
+        <MapInstanceCatcher onReady={setMap} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

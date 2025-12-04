@@ -1,8 +1,7 @@
 'use client'
 
-import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet'
+import { MapContainer, Marker, Popup, TileLayer, useMap, ZoomControl } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
@@ -33,14 +32,15 @@ export type MapProperty = {
   has_recent_activity: boolean
 }
 
-type PropertyStatus = 'for-sale' | 'for-rent' | 'open' | 'claimed' | 'unclaimed'
-
 interface ShopMapProps {
   center?: [number, number]
   zoom?: number
   onShopClick?: (property: MapProperty) => void
   currentUserId?: string | null
   refreshSignal?: number
+  activeFilter?: 'all' | 'open' | 'claimed'
+  intentOverrides?: Record<string, Partial<Pick<MapProperty, 'is_for_sale' | 'is_for_rent' | 'is_open_to_talking' | 'is_claimed' | 'claimed_by_user_id'>>>
+  onMapReady?: (map: L.Map) => void
 }
 
 function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
@@ -51,86 +51,7 @@ function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
   return null
 }
 
-const INDIVIDUAL_MARKER_ZOOM = 17
-const PIN_LEGEND = [
-  { label: 'Claimed', letter: 'C', color: 'var(--pin-claimed, #007c7c)' },
-  { label: 'Open to conversations', letter: 'O', color: 'var(--pin-open, #009b9b)' },
-  { label: 'Unclaimed', letter: 'U', color: 'var(--pin-unclaimed, #94a3b8)' },
-  { label: 'You', letter: 'H', color: 'var(--pin-user, #004f4f)' },
-]
-
-// Marker variants
-const circleIcon = (options: { color: string; border?: string; label?: string; size?: number }) => {
-  const size = options.size ?? 26
-  const border = options.border ?? '#ffffff'
-  const label = options.label ?? ''
-  return L.divIcon({
-    html: `
-      <div style="
-        background-color: ${options.color};
-        width: ${size}px;
-        height: ${size}px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        font-weight: 700;
-        color: #ffffff;
-        border: 3px solid ${border};
-        box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-      ">
-        ${label}
-      </div>
-    `,
-    className: 'custom-circle-marker',
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -(size / 2)],
-  })
-}
-
-const hollowIcon = (options: { color: string; label?: string; size?: number }) => {
-  const size = options.size ?? 26
-  const label = options.label ?? ''
-  return L.divIcon({
-    html: `
-      <div style="
-        background-color: rgba(255,255,255,0.85);
-        width: ${size}px;
-        height: ${size}px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        font-weight: 700;
-        color: ${options.color};
-        border: 2px solid ${options.color};
-        box-shadow: 0 2px 6px rgba(0,0,0,0.12);
-      ">
-        ${label}
-      </div>
-    `,
-    className: 'custom-circle-marker',
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -(size / 2)],
-  })
-}
-
-const yourHomeIcon = circleIcon({ color: 'var(--pin-user, #004f4f)', label: 'H', size: 30 })
-const openHomeIcon = circleIcon({ color: 'var(--pin-open, #009b9b)', label: 'O' })
-const claimedHomeIcon = circleIcon({ color: 'var(--pin-claimed, #007c7c)', label: 'C' })
-const unclaimedHomeIcon = hollowIcon({ color: 'var(--pin-unclaimed, #94a3b8)', label: 'U' })
-
-const clusterIcon = (count: number) =>
-  L.divIcon({
-    html: `<div style="background:var(--brand-primary, #007c7c);color:white;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.18);">${count}</div>`,
-    className: 'custom-cluster-marker',
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
-  })
+const INDIVIDUAL_MARKER_ZOOM = 16
 
 function buildDisplayLabel(property: MapProperty) {
   const { house_number, street, postcode } = property
@@ -146,39 +67,44 @@ function buildDisplayLabel(property: MapProperty) {
   return 'Home'
 }
 
-function derivePropertyStatus(p: MapProperty): PropertyStatus {
-  if (p.is_for_sale) return 'for-sale'
-  if (p.is_for_rent) return 'for-rent'
-  if (p.is_open_to_talking) return 'open'
-  if (p.is_claimed) return 'claimed'
-  return 'unclaimed'
-}
-
 export default function ShopMap({
   center = [54.9749, -1.6103],
   zoom = 14,
   onShopClick,
   currentUserId,
   refreshSignal = 0,
+  activeFilter = 'all',
+  intentOverrides = {},
+  onMapReady,
 }: ShopMapProps) {
   console.log('[ShopMap] render')
   const [map, setMap] = useState<L.Map | null>(null)
   const [properties, setProperties] = useState<MapProperty[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showLoadingBadge, setShowLoadingBadge] = useState(false)
-  const [truncated, setTruncated] = useState(false)
-  const [visibleCount, setVisibleCount] = useState<number | null>(null)
-  const [totalCount, setTotalCount] = useState<number | null>(null)
 
   const [filterOpen, setFilterOpen] = useState<boolean>(false)
-  const [filterForSale, setFilterForSale] = useState<boolean>(false)
-  const [filterForRent, setFilterForRent] = useState<boolean>(false)
+  const filterForSale = false
+  const filterForRent = false
   const [filterClaimed, setFilterClaimed] = useState<'all' | 'claimed' | 'unclaimed'>('all')
 
   const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
   const hasFitBounds = useRef(false)
   const lastFetchKey = useRef<string | null>(null)
   const fetchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressFetchUntil = useRef<number>(0)
+
+  useEffect(() => {
+    setFilterOpen(activeFilter === 'open')
+    setFilterClaimed(activeFilter === 'claimed' ? 'claimed' : 'all')
+    lastFetchKey.current = null
+  }, [activeFilter])
+
+  useEffect(() => {
+    if (map && onMapReady) {
+      onMapReady(map)
+    }
+  }, [map, onMapReady])
 
   const buildBoundsKey = useCallback(
     (bounds: LatLngBounds, zoomValue: number) => {
@@ -252,6 +178,9 @@ export default function ShopMap({
 
   const fetchForBounds = useCallback(async () => {
     if (!map) return
+    if (suppressFetchUntil.current > Date.now()) {
+      return
+    }
 
     const bounds = map.getBounds()
     const zoomValue = map.getZoom()
@@ -300,10 +229,13 @@ export default function ShopMap({
         return
       }
 
-      setProperties(json.data ?? [])
-      setVisibleCount(Array.isArray(json.data) ? json.data.length : null)
-      setTotalCount(typeof json.totalCount === 'number' ? json.totalCount : null)
-      setTruncated(Boolean(json.truncated))
+      setProperties((prev) => {
+        const next = json.data ?? []
+        const prevIds = prev.map((p) => p.id).join('|')
+        const nextIds = next.map((p: MapProperty) => p.id).join('|')
+        if (prevIds === nextIds) return prev
+        return next
+      })
 
       if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
         const fitBounds = L.latLngBounds(json.data.map((p: MapProperty) => [p.lat, p.lon] as [number, number]))
@@ -312,8 +244,7 @@ export default function ShopMap({
       }
     } catch (err) {
       console.error('[ShopMap] network error fetching properties', err)
-      setProperties([])
-      setTruncated(false)
+      // Keep existing properties to avoid unmounting markers on transient errors
     } finally {
       setIsLoading(false)
     }
@@ -354,13 +285,44 @@ export default function ShopMap({
     fetchForBounds()
   }, [fetchForBounds, map, refreshSignal])
 
+  const createIcon = (color: string, isOwner: boolean) => {
+    const size = isOwner ? 22 : 18
+    const borderWidth = isOwner ? 4 : 2
+    const ring = isOwner ? 'box-shadow:0 0 0 2px rgba(0,0,0,0.1);' : ''
+    return L.divIcon({
+      html: `
+        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid #fff;${ring}background:${color};border-radius:9999px;" aria-hidden="true"></div>
+      `,
+      className: 'nest-pin',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      popupAnchor: [0, -size / 2],
+    })
+  }
+
   const getShopIcon = (property: MapProperty) => {
-    const isClaimedByMe = !!currentUserId && property.claimed_by_user_id === currentUserId
-    // Prioritize "open to conversations" so it's visually obvious, even if claimed
-    if (property.is_open_to_talking) return openHomeIcon
-    if (isClaimedByMe) return yourHomeIcon
-    if (property.is_claimed) return claimedHomeIcon
-    return unclaimedHomeIcon
+    const override = intentOverrides[property.id]
+    const merged = override ? { ...property, ...override } : property
+    const isOwner = !!currentUserId && merged.claimed_by_user_id === currentUserId
+    const isSale = merged.is_for_sale
+    const isRent = merged.is_for_rent
+    const isOpen = merged.is_open_to_talking
+    const isClaimed = merged.is_claimed
+
+    let color = '#9CA3AF' // grey default
+    if (isSale) {
+      color = '#E65F52'
+    } else if (isRent) {
+      color = '#6366F1'
+    } else if (isOpen) {
+      color = '#007C7C'
+    } else if (isClaimed) {
+      color = '#F5A623'
+    }
+
+    const icon = createIcon(color, isOwner)
+    const zIndexOffset = isOwner ? 1000 : (isSale || isRent || isOpen ? 500 : 0)
+    return { icon, zIndexOffset }
   }
 
   const handleClusterClick = useCallback(
@@ -382,49 +344,23 @@ export default function ShopMap({
     [onShopClick, propertyMap]
   )
 
-  const renderPropertyMarker = (property: MapProperty) => {
-    const label = buildDisplayLabel(property)
-    const address = property.postcode || property.street || 'No postcode'
-
-    return (
-      <Marker
-        key={property.id}
-        position={[property.lat, property.lon]}
-        icon={getShopIcon(property)}
-        eventHandlers={{
-          click: () => handlePointClick(property.id),
-        }}
-      >
-        <Popup>
-          <div className="p-3 min-w-[220px]">
-            <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
-            <p className="text-sm text-stone-600 mb-3">{address}</p>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handlePointClick(property.id)
-              }}
-              className="w-full px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium transition-colors"
-            >
-              View home
-            </button>
-          </div>
-        </Popup>
-      </Marker>
-    )
-  }
-
   const renderClusterOrMarker = (cluster: any) => {
     const [lon, lat] = cluster.geometry.coordinates
     const isCluster = cluster.properties.cluster
 
     if (isCluster) {
+      // Keep basic cluster handling (expand on click) but reuse simple pin styling
       const count = cluster.properties.point_count
       return (
         <Marker
           key={`cluster-${cluster.id}`}
           position={[lat, lon]}
-          icon={clusterIcon(count)}
+          icon={L.divIcon({
+            html: `<div class="bg-[#007C7C] text-white w-9 h-9 rounded-full flex items-center justify-center font-bold border-2 border-white shadow-lg">${count}</div>`,
+            className: 'nest-cluster',
+            iconSize: [36, 36],
+            iconAnchor: [18, 18],
+          })}
           eventHandlers={{
             click: () => handleClusterClick(cluster),
           }}
@@ -435,8 +371,92 @@ export default function ShopMap({
     const property = propertyMap.get(cluster.properties.id)
     if (!property) return null
 
-    return renderPropertyMarker(property)
+    const override = intentOverrides[property.id]
+    const displayProperty = override ? { ...property, ...override } : property
+    const label = buildDisplayLabel(displayProperty)
+    const address = displayProperty.postcode || displayProperty.street || 'No postcode'
+    const { icon, zIndexOffset } = getShopIcon(displayProperty)
+
+    return (
+      <Marker
+        key={displayProperty.id}
+        position={[displayProperty.lat, displayProperty.lon]}
+        icon={icon}
+        zIndexOffset={zIndexOffset}
+        bubblingMouseEvents={false}
+        interactive
+        eventHandlers={{
+          click: (e) => {
+            suppressFetchUntil.current = Date.now() + 300
+            // @ts-expect-error Leaflet originalEvent
+            e?.originalEvent?.stopPropagation?.()
+            onShopClick?.(displayProperty)
+          },
+        }}
+      >
+        <Popup>
+          <div className="p-3 min-w-[220px]">
+            <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
+            <p className="text-sm text-stone-600 mb-3">{address}</p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onShopClick?.(displayProperty)
+              }}
+              className="w-full px-3 py-1.5 bg-[#007C7C] text-white rounded-full hover:bg-[#006868] text-sm font-medium transition-colors"
+            >
+              View home
+            </button>
+          </div>
+        </Popup>
+      </Marker>
+    )
   }
+
+  const markers = useMemo(() => {
+    return properties.map((property) => {
+      const override = intentOverrides[property.id]
+      const displayProperty = override ? { ...property, ...override } : property
+      const label = buildDisplayLabel(displayProperty)
+      const address = displayProperty.postcode || displayProperty.street || 'No postcode'
+      const { icon, zIndexOffset } = getShopIcon(displayProperty)
+
+      return (
+        <Marker
+          key={displayProperty.id}
+          position={[displayProperty.lat, displayProperty.lon]}
+          icon={icon}
+          zIndexOffset={zIndexOffset}
+          bubblingMouseEvents={false}
+          interactive
+          eventHandlers={{
+            click: (e) => {
+              suppressFetchUntil.current = Date.now() + 300
+              // @ts-expect-error Leaflet originalEvent
+              e?.originalEvent?.stopPropagation?.()
+              onShopClick?.(displayProperty)
+            },
+          }}
+        >
+          <Popup>
+            <div className="p-3 min-w-[220px]">
+              <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
+              <p className="text-sm text-stone-600 mb-3">{address}</p>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onShopClick?.(displayProperty)
+                }}
+                className="w-full px-3 py-1.5 bg-[#007C7C] text-white rounded-full hover:bg-[#006868] text-sm font-medium transition-colors"
+              >
+                View home
+              </button>
+            </div>
+          </Popup>
+        </Marker>
+      )
+    })
+  }, [getShopIcon, intentOverrides, onShopClick, properties])
 
   return (
     <div className="relative w-full h-full">
@@ -446,92 +466,23 @@ export default function ShopMap({
           Updating map…
         </div>
       )}
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-        <span className="font-medium text-slate-800">Who&apos;s looking?</span>
-
-        <button
-          type="button"
-          onClick={() => setFilterOpen((prev) => !prev)}
-          className={clsx(
-            'rounded-full border px-3 py-1 transition-colors',
-            filterOpen ? 'border-[var(--brand-primary,#007c7c)] bg-[color:rgba(0,124,124,0.1)] text-[var(--brand-primary,#007c7c)]' : 'border-slate-200 bg-white text-slate-600'
-          )}
-        >
-          Open to conversations
-        </button>
-
-        <div className="ml-auto flex items-center gap-1">
-          <span className="text-[11px] text-slate-500">Claimed:</span>
-          <select
-            value={filterClaimed}
-            onChange={(e) => setFilterClaimed(e.target.value as 'all' | 'claimed' | 'unclaimed')}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
-          >
-            <option value="all">All</option>
-            <option value="claimed">Claimed</option>
-            <option value="unclaimed">Unclaimed</option>
-          </select>
-        </div>
-      </div>
-
-      {(totalCount != null || visibleCount != null) && (
-        <div className="mb-1 text-[11px] text-slate-500">
-          {totalCount != null ? (
-            <>
-              <span className="font-medium text-slate-800">{totalCount.toLocaleString('en-GB')} homes</span> people are curious about here
-            </>
-          ) : visibleCount != null ? (
-            <>
-              <span className="font-medium text-slate-800">{visibleCount.toLocaleString('en-GB')} homes</span> people are curious about here
-            </>
-          ) : null}
-          {truncated && (
-            <span className="ml-1 text-slate-400">
-              (showing first {visibleCount?.toLocaleString('en-GB') ?? '...'} — zoom in or loosen filters to see more)
-            </span>
-          )}
-        </div>
-      )}
-
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-700">
-        <span className="font-medium text-slate-800">Pin key:</span>
-        {PIN_LEGEND.map((item) => (
-          <div
-            key={item.label}
-            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-sm"
-          >
-            <span
-              className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-              style={{ backgroundColor: item.color }}
-            >
-              {item.letter}
-            </span>
-            <span className="text-[11px] text-slate-700">{item.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {!isLoading && properties.length === 0 && (
-        <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
-          Quiet street — for now. Pan the map or relax filters to see who&apos;s looking nearby.
-        </div>
-      )}
-
       <MapContainer
         center={center}
         zoom={zoom}
         className="w-full h-full"
         scrollWheelZoom={true}
-        style={{ width: '100%', height: '100%', minHeight: '500px' }}
+        zoomControl={false}
+        style={{ width: '100%', height: '100%' }}
       >
         <MapInstanceCatcher onReady={setMap} />
+        <ZoomControl position="bottomright" />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors & Carto'
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         />
 
         {map && zoomLevel >= INDIVIDUAL_MARKER_ZOOM
-          ? properties.map((property) => renderPropertyMarker(property))
+          ? markers
           : clusters.map((cluster: any) => renderClusterOrMarker(cluster))}
       </MapContainer>
     </div>

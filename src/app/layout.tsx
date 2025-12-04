@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BitcoinLatte - Find Bitcoin-Accepting Coffee Shops",
+  title: "Nest - For talking",
   description: "Discover coffee shops that accept Bitcoin and cryptocurrency payments. Browse, submit, and review Bitcoin-friendly cafes near you.",
   manifest: "/manifest.json",
   icons: {

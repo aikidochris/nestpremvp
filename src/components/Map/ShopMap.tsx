@@ -6,6 +6,7 @@ import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
+import type { LatLngBounds } from 'leaflet'
 
 // Fix for default marker icons in Next.js
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -39,6 +40,7 @@ interface ShopMapProps {
   zoom?: number
   onShopClick?: (property: MapProperty) => void
   currentUserId?: string | null
+  refreshSignal?: number
 }
 
 function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
@@ -50,152 +52,84 @@ function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
 }
 
 const INDIVIDUAL_MARKER_ZOOM = 17
+const PIN_LEGEND = [
+  { label: 'Claimed', letter: 'C', color: 'var(--pin-claimed, #007c7c)' },
+  { label: 'Open to conversations', letter: 'O', color: 'var(--pin-open, #009b9b)' },
+  { label: 'Unclaimed', letter: 'U', color: 'var(--pin-unclaimed, #94a3b8)' },
+  { label: 'You', letter: 'H', color: 'var(--pin-user, #004f4f)' },
+]
 
 // Marker variants
-const yourHomeIcon = L.divIcon({
-  className: 'custom-user-marker',
-  html: `
-    <div style="
-      background-color: #f59e0b;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    ">
-      H
-    </div>
-  `,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-  popupAnchor: [0, -16],
-})
+const circleIcon = (options: { color: string; border?: string; label?: string; size?: number }) => {
+  const size = options.size ?? 26
+  const border = options.border ?? '#ffffff'
+  const label = options.label ?? ''
+  return L.divIcon({
+    html: `
+      <div style="
+        background-color: ${options.color};
+        width: ${size}px;
+        height: ${size}px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: #ffffff;
+        border: 3px solid ${border};
+        box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+      ">
+        ${label}
+      </div>
+    `,
+    className: 'custom-circle-marker',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -(size / 2)],
+  })
+}
 
-const forSaleIcon = L.divIcon({
-  className: 'custom-sale-marker',
-  html: `
-    <div style="
-      background-color: #ef4444;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    ">
-      S
-    </div>
-  `,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-  popupAnchor: [0, -16],
-})
+const hollowIcon = (options: { color: string; label?: string; size?: number }) => {
+  const size = options.size ?? 26
+  const label = options.label ?? ''
+  return L.divIcon({
+    html: `
+      <div style="
+        background-color: rgba(255,255,255,0.85);
+        width: ${size}px;
+        height: ${size}px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: ${options.color};
+        border: 2px solid ${options.color};
+        box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+      ">
+        ${label}
+      </div>
+    `,
+    className: 'custom-circle-marker',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -(size / 2)],
+  })
+}
 
-const forRentIcon = L.divIcon({
-  className: 'custom-rent-marker',
-  html: `
-    <div style="
-      background-color: #3b82f6;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    ">
-      R
-    </div>
-  `,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-  popupAnchor: [0, -16],
-})
-
-const openHomeIcon = L.divIcon({
-  className: 'custom-open-marker',
-  html: `
-    <div style="
-      background-color: #22c55e;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    ">
-      O
-    </div>
-  `,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-  popupAnchor: [0, -16],
-})
-
-const claimedHomeIcon = L.divIcon({
-  className: 'custom-claimed-marker',
-  html: `
-    <div style="
-      background-color: #a855f7;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    ">
-      C
-    </div>
-  `,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-  popupAnchor: [0, -16],
-})
-
-const unclaimedHomeIcon = L.divIcon({
-  className: 'custom-other-marker',
-  html: `
-    <div style="
-      background-color: #6b7280;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    ">
-      U
-    </div>
-  `,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-  popupAnchor: [0, -16],
-})
+const yourHomeIcon = circleIcon({ color: 'var(--pin-user, #004f4f)', label: 'H', size: 30 })
+const openHomeIcon = circleIcon({ color: 'var(--pin-open, #009b9b)', label: 'O' })
+const claimedHomeIcon = circleIcon({ color: 'var(--pin-claimed, #007c7c)', label: 'C' })
+const unclaimedHomeIcon = hollowIcon({ color: 'var(--pin-unclaimed, #94a3b8)', label: 'U' })
 
 const clusterIcon = (count: number) =>
   L.divIcon({
-    html: `<div style="background:#f97316;color:white;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);">${count}</div>`,
+    html: `<div style="background:var(--brand-primary, #007c7c);color:white;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #ffffff;box-shadow:0 2px 8px rgba(0,0,0,0.18);">${count}</div>`,
     className: 'custom-cluster-marker',
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
   })
 
 function buildDisplayLabel(property: MapProperty) {
@@ -225,11 +159,13 @@ export default function ShopMap({
   zoom = 14,
   onShopClick,
   currentUserId,
+  refreshSignal = 0,
 }: ShopMapProps) {
   console.log('[ShopMap] render')
   const [map, setMap] = useState<L.Map | null>(null)
   const [properties, setProperties] = useState<MapProperty[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [showLoadingBadge, setShowLoadingBadge] = useState(false)
   const [truncated, setTruncated] = useState(false)
   const [visibleCount, setVisibleCount] = useState<number | null>(null)
   const [totalCount, setTotalCount] = useState<number | null>(null)
@@ -241,6 +177,19 @@ export default function ShopMap({
 
   const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
   const hasFitBounds = useRef(false)
+  const lastFetchKey = useRef<string | null>(null)
+  const fetchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const buildBoundsKey = useCallback(
+    (bounds: LatLngBounds, zoomValue: number) => {
+      const north = bounds.getNorth().toFixed(6)
+      const south = bounds.getSouth().toFixed(6)
+      const east = bounds.getEast().toFixed(6)
+      const west = bounds.getWest().toFixed(6)
+      return `${north}|${south}|${east}|${west}|${zoomValue}|${filterOpen}|${filterForSale}|${filterForRent}|${filterClaimed}`
+    },
+    [filterClaimed, filterForRent, filterForSale, filterOpen]
+  )
 
   const propertyMap = useMemo(() => {
     const m = new Map<string, MapProperty>()
@@ -287,110 +236,131 @@ export default function ShopMap({
     return clusterIndex.getClusters([west, south, east, north], zoomLevel)
   }, [clusterIndex, map, viewport, zoomLevel])
 
+  // Delay showing the loading badge to avoid flicker on quick pans/zooms
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    if (isLoading) {
+      timeout = setTimeout(() => setShowLoadingBadge(true), 180)
+    } else {
+      setShowLoadingBadge(false)
+      if (timeout) clearTimeout(timeout)
+    }
+    return () => {
+      if (timeout) clearTimeout(timeout)
+    }
+  }, [isLoading])
+
+  const fetchForBounds = useCallback(async () => {
+    if (!map) return
+
+    const bounds = map.getBounds()
+    const zoomValue = map.getZoom()
+    const key = buildBoundsKey(bounds, zoomValue)
+
+    // Prevent tight loops when Leaflet fires multiple move/zoom events with same viewport/filters
+    if (key === lastFetchKey.current) {
+      return
+    }
+    lastFetchKey.current = key
+
+    setViewport({
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      west: bounds.getWest(),
+      zoom: zoomValue,
+    })
+
+    const params = new URLSearchParams()
+    params.set('north', bounds.getNorth().toString())
+    params.set('south', bounds.getSouth().toString())
+    params.set('east', bounds.getEast().toString())
+    params.set('west', bounds.getWest().toString())
+    params.set('filter_open', String(filterOpen))
+    params.set('filter_for_sale', String(filterForSale))
+    params.set('filter_for_rent', String(filterForRent))
+    params.set('filter_claimed', filterClaimed)
+
+    const url = `/api/properties?${params.toString()}`
+    console.log('[ShopMap] fetching properties', url)
+
+    try {
+      setIsLoading(true)
+      const res = await fetch(url)
+      const json = await res.json()
+
+      console.log('[ShopMap] /api/properties response', {
+        status: res.status,
+        count: Array.isArray(json.data) ? json.data.length : 0,
+        truncated: json.truncated,
+      })
+
+      if (!res.ok) {
+        console.error('[ShopMap] error from /api/properties', json)
+        return
+      }
+
+      setProperties(json.data ?? [])
+      setVisibleCount(Array.isArray(json.data) ? json.data.length : null)
+      setTotalCount(typeof json.totalCount === 'number' ? json.totalCount : null)
+      setTruncated(Boolean(json.truncated))
+
+      if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
+        const fitBounds = L.latLngBounds(json.data.map((p: MapProperty) => [p.lat, p.lon] as [number, number]))
+        map.fitBounds(fitBounds)
+        hasFitBounds.current = true
+      }
+    } catch (err) {
+      console.error('[ShopMap] network error fetching properties', err)
+      setProperties([])
+      setTruncated(false)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [buildBoundsKey, filterClaimed, filterForRent, filterForSale, filterOpen, map])
+
   useEffect(() => {
     if (!map) {
       console.log('[ShopMap] map not ready yet')
       return
     }
 
-    let cancelled = false
-
-    const fetchForBounds = async () => {
-      if (!map) return
-
-      const bounds = map.getBounds()
-      const north = bounds.getNorth()
-      const south = bounds.getSouth()
-      const east = bounds.getEast()
-      const west = bounds.getWest()
-
-      setViewport({ north, south, east, west, zoom: map.getZoom() })
-
-      const params = new URLSearchParams()
-      params.set('north', north.toString())
-      params.set('south', south.toString())
-      params.set('east', east.toString())
-      params.set('west', west.toString())
-      params.set('filter_open', String(filterOpen))
-      params.set('filter_for_sale', String(filterForSale))
-      params.set('filter_for_rent', String(filterForRent))
-      params.set('filter_claimed', filterClaimed)
-
-      const url = `/api/properties?${params.toString()}`
-      console.log('[ShopMap] fetching properties', url)
-
-      try {
-        setIsLoading(true)
-        const res = await fetch(url)
-        const json = await res.json()
-
-        console.log('[ShopMap] /api/properties response', {
-          status: res.status,
-          count: Array.isArray(json.data) ? json.data.length : 0,
-          truncated: json.truncated,
-        })
-
-        if (!res.ok || cancelled) {
-          if (!res.ok) console.error('[ShopMap] error from /api/properties', json)
-          return
-        }
-
-        setProperties(json.data ?? [])
-        setVisibleCount(Array.isArray(json.data) ? json.data.length : null)
-        setTotalCount(typeof json.totalCount === 'number' ? json.totalCount : null)
-        setTruncated(Boolean(json.truncated))
-
-        if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
-          const bounds = L.latLngBounds(json.data.map((p: MapProperty) => [p.lat, p.lon] as [number, number]))
-          map.fitBounds(bounds)
-          hasFitBounds.current = true
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('[ShopMap] network error fetching properties', err)
-          setProperties([])
-          setTruncated(false)
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false)
-        }
-      }
+    const debouncedFetch = () => {
+      if (fetchTimeout.current) clearTimeout(fetchTimeout.current)
+      fetchTimeout.current = setTimeout(() => {
+        fetchForBounds()
+      }, 120)
     }
 
     // initial fetch
-    fetchForBounds()
+    debouncedFetch()
 
     // refetch on move/zoom
-    map.on('moveend', fetchForBounds)
-    map.on('zoomend', fetchForBounds)
+    map.on('moveend', debouncedFetch)
+    map.on('zoomend', debouncedFetch)
 
     return () => {
-      cancelled = true
-      map.off('moveend', fetchForBounds)
-      map.off('zoomend', fetchForBounds)
+      if (fetchTimeout.current) {
+        clearTimeout(fetchTimeout.current)
+      }
+      map.off('moveend', debouncedFetch)
+      map.off('zoomend', debouncedFetch)
     }
-  }, [map, filterOpen, filterForSale, filterForRent, filterClaimed])
+  }, [fetchForBounds, map])
+
+  // Trigger a refresh when parent signals (e.g., after toggling open-to-conversation)
+  useEffect(() => {
+    if (!map) return
+    fetchForBounds()
+  }, [fetchForBounds, map, refreshSignal])
 
   const getShopIcon = (property: MapProperty) => {
     const isClaimedByMe = !!currentUserId && property.claimed_by_user_id === currentUserId
-    const status = derivePropertyStatus(property)
-
+    // Prioritize "open to conversations" so it's visually obvious, even if claimed
+    if (property.is_open_to_talking) return openHomeIcon
     if (isClaimedByMe) return yourHomeIcon
-
-    switch (status) {
-      case 'for-sale':
-        return forSaleIcon
-      case 'for-rent':
-        return forRentIcon
-      case 'open':
-        return openHomeIcon
-      case 'claimed':
-        return claimedHomeIcon
-      case 'unclaimed':
-      default:
-        return unclaimedHomeIcon
-    }
+    if (property.is_claimed) return claimedHomeIcon
+    return unclaimedHomeIcon
   }
 
   const handleClusterClick = useCallback(
@@ -470,40 +440,24 @@ export default function ShopMap({
 
   return (
     <div className="relative w-full h-full">
+      {showLoadingBadge && (
+        <div className="absolute right-3 top-3 z-[1000] flex items-center gap-2 rounded-full bg-white/95 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-lg ring-1 ring-slate-200">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+          Updating map…
+        </div>
+      )}
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-        <span className="font-medium">Filter:</span>
+        <span className="font-medium text-slate-800">Who&apos;s looking?</span>
 
         <button
           type="button"
           onClick={() => setFilterOpen((prev) => !prev)}
           className={clsx(
             'rounded-full border px-3 py-1 transition-colors',
-            filterOpen ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600'
+            filterOpen ? 'border-[var(--brand-primary,#007c7c)] bg-[color:rgba(0,124,124,0.1)] text-[var(--brand-primary,#007c7c)]' : 'border-slate-200 bg-white text-slate-600'
           )}
         >
           Open to conversations
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilterForSale((prev) => !prev)}
-          className={clsx(
-            'rounded-full border px-3 py-1 transition-colors',
-            filterForSale ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-600'
-          )}
-        >
-          For sale
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilterForRent((prev) => !prev)}
-          className={clsx(
-            'rounded-full border px-3 py-1 transition-colors',
-            filterForRent ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'
-          )}
-        >
-          For rent
         </button>
 
         <div className="ml-auto flex items-center gap-1">
@@ -524,22 +478,44 @@ export default function ShopMap({
         <div className="mb-1 text-[11px] text-slate-500">
           {totalCount != null ? (
             <>
-              <span className="font-medium text-slate-700">{totalCount.toLocaleString('en-GB')} homes</span> in this area
+              <span className="font-medium text-slate-800">{totalCount.toLocaleString('en-GB')} homes</span> people are curious about here
             </>
           ) : visibleCount != null ? (
             <>
-              <span className="font-medium text-slate-700">{visibleCount.toLocaleString('en-GB')} homes</span> in this area
+              <span className="font-medium text-slate-800">{visibleCount.toLocaleString('en-GB')} homes</span> people are curious about here
             </>
           ) : null}
           {truncated && (
             <span className="ml-1 text-slate-400">
-              (showing first {visibleCount?.toLocaleString('en-GB') ?? '...'} – zoom in or refine filters)
+              (showing first {visibleCount?.toLocaleString('en-GB') ?? '...'} — zoom in or loosen filters to see more)
             </span>
           )}
         </div>
       )}
 
-      {isLoading && <div className="mb-2 text-[11px] text-slate-500">Updating homes...</div>}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-700">
+        <span className="font-medium text-slate-800">Pin key:</span>
+        {PIN_LEGEND.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-sm"
+          >
+            <span
+              className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+              style={{ backgroundColor: item.color }}
+            >
+              {item.letter}
+            </span>
+            <span className="text-[11px] text-slate-700">{item.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {!isLoading && properties.length === 0 && (
+        <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
+          Quiet street — for now. Pan the map or relax filters to see who&apos;s looking nearby.
+        </div>
+      )}
 
       <MapContainer
         center={center}
@@ -550,8 +526,8 @@ export default function ShopMap({
       >
         <MapInstanceCatcher onReady={setMap} />
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors & Carto'
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         />
 
         {map && zoomLevel >= INDIVIDUAL_MARKER_ZOOM

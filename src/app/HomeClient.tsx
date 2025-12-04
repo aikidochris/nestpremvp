@@ -1,5 +1,6 @@
 'use client'
 
+import clsx from 'clsx'
 import { useRouter } from 'next/navigation'
 import { useState, useCallback, useEffect, type ChangeEvent } from 'react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
@@ -45,6 +46,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
   const [softListingLoading, setSoftListingLoading] = useState(false)
   const [softListingSaving, setSoftListingSaving] = useState(false)
   const [softListingError, setSoftListingError] = useState<string | null>(null)
+  const [mapRefreshSignal, setMapRefreshSignal] = useState(0)
 
   useEffect(() => {
     let mounted = true
@@ -415,6 +417,15 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
       setSoftListingError(error.message ?? 'Failed to update conversation preference.')
     }
 
+    // update selectedHome and shops list optimistically
+    setSelectedHome((prev: any) => (prev ? { ...prev, is_open_to_talking: next } : prev))
+    setShops((prev) =>
+      prev.map((p) => (p.id === selectedHome.id ? { ...p, is_open_to_talking: next } : p))
+    )
+
+    // Bump refresh signal so the map fetches latest flags
+    setMapRefreshSignal((s) => s + 1)
+
     setSoftListingSaving(false)
   }
 
@@ -496,43 +507,48 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
     router.push('/')
   }
 
+  const openCount = shops.filter((s) => s.is_open_to_talking).length
+  const saleCount = shops.filter((s) => s.is_for_sale).length
+  const rentCount = shops.filter((s) => s.is_for_rent).length
+
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-orange-50 to-amber-50">
-      <header className="bg-white shadow-lg border-b-4 border-orange-500 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-4">
-              <h1 className="text-4xl font-black text-gray-900">Nest</h1>
+    <div className="min-h-screen flex flex-col bg-white">
+      <header className="bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col">
+                <h1 className="text-3xl font-black text-slate-900 tracking-tight">Nest</h1>
+                <p className="text-sm text-slate-500">Not for sale. For talking.</p>
+              </div>
             </div>
             <div className="flex gap-3 items-center">
-              {(isAdmin && currentUser) && (
+              {isAdmin && currentUser && (
                 <a
                   href="/admin"
-                  className="px-6 py-3 bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700 transition-all hover:scale-105 shadow-lg"
+                  className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-semibold shadow hover:bg-violet-700 transition"
                 >
-                  �Y'' Admin
+                  Admin
                 </a>
               )}
               <a
                 href="/shops/submit"
-                className="px-6 py-3 bg-orange-600 text-white rounded-lg font-bold hover:bg-orange-700 transition-all hover:scale-105 shadow-lg"
+                className="px-4 py-2 rounded-lg bg-[var(--brand-primary,#007c7c)] text-white text-sm font-semibold shadow hover:bg-[#006868] transition"
               >
-                �z Add Shop
+                Add home
               </a>
               {authLoading ? (
-                <div className="px-4 py-2 bg-gray-100 border rounded-lg text-sm text-gray-600">
+                <div className="px-4 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-600">
                   Checking session...
                 </div>
               ) : currentUser ? (
-                <div className="flex items-center gap-3">
-                  <div className="px-4 py-2 bg-green-100 border-2 border-green-500 rounded-lg">
-                    <span className="text-green-700 font-bold text-sm">
-                      �o" {currentUser.email}
-                    </span>
+                <div className="flex items-center gap-2">
+                  <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <span className="text-emerald-700 font-semibold text-sm">{currentUser.email}</span>
                   </div>
                   <button
                     onClick={handleLogout}
-                    className="px-6 py-3 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 transition-all hover:scale-105 shadow-lg"
+                    className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-800 hover:bg-slate-100 transition"
                   >
                     Logout
                   </button>
@@ -540,7 +556,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
               ) : (
                 <a
                   href="/auth/login"
-                  className="px-6 py-3 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-900 transition-all hover:scale-105 shadow-lg"
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-800 hover:bg-slate-100 transition"
                 >
                   Login
                 </a>
@@ -548,47 +564,41 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
             </div>
           </div>
 
-          <div className="relative">
+          <div className="relative mt-4">
             <input
               type="text"
-              placeholder="Search coffee shops, cities, or cryptocurrencies..."
+              placeholder="Search streets, postcodes, or people looking..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-6 py-4 pl-14 text-lg border-2 border-gray-300 rounded-xl focus:border-orange-500 focus:ring-4 focus:ring-orange-200 outline-none transition-all"
+              className="w-full px-5 py-4 pl-14 text-base border border-slate-200 rounded-xl focus:border-orange-500 focus:ring-4 focus:ring-orange-100 outline-none transition"
             />
-            <span className="absolute left-5 top-1/2 -translate-y-1/2 text-2xl">�Y"?</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl text-slate-400">🔍</span>
           </div>
         </div>
       </header>
 
-      <div className="bg-white border-b-2 border-gray-200 py-6 shadow-md">
+      <div className="bg-white border-b border-slate-200 py-6 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-2xl shadow-xl">
-              <div className="flex items-center gap-4">
-                <span className="text-5xl">�Y?�</span>
-                <div>
-                  <p className="text-4xl font-black">{shops.length}</p>
-                  <p className="text-orange-100 font-bold uppercase text-sm">Coffee Shops</p>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-[var(--brand-primary,#007c7c)] bg-white p-5 shadow-sm flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-[var(--brand-primary,#007c7c)]/10 text-[var(--brand-primary,#007c7c)] flex items-center justify-center text-2xl shadow-inner">👀</div>
+              <div>
+                <p className="text-3xl font-black text-slate-900">{shops.length.toLocaleString('en-GB')}</p>
+                <p className="text-xs tracking-wide text-slate-600 font-semibold">Homes watched</p>
               </div>
             </div>
-            <div className="bg-gradient-to-br from-amber-500 to-yellow-500 text-white p-6 rounded-2xl shadow-xl">
-              <div className="flex items-center gap-4">
-                <span className="text-5xl">�'�</span>
-                <div>
-                  <p className="text-3xl font-black">Bitcoin</p>
-                  <p className="text-amber-100 font-bold uppercase text-sm">Accepted</p>
-                </div>
+            <div className="rounded-2xl border border-[var(--brand-primary,#007c7c)] bg-white p-5 shadow-sm flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-[var(--brand-primary,#007c7c)]/10 text-[var(--brand-primary,#007c7c)] flex items-center justify-center text-2xl shadow-inner">💬</div>
+              <div>
+                <p className="text-3xl font-black text-slate-900">{openCount.toLocaleString('en-GB')}</p>
+                <p className="text-xs tracking-wide text-slate-600 font-semibold">Open to conversations</p>
               </div>
             </div>
-            <div className="bg-gradient-to-br from-yellow-500 to-orange-400 text-white p-6 rounded-2xl shadow-xl">
-              <div className="flex items-center gap-4">
-                <span className="text-5xl">�s�</span>
-                <div>
-                  <p className="text-3xl font-black">Lightning</p>
-                  <p className="text-yellow-100 font-bold uppercase text-sm">Fast Payments</p>
-                </div>
+            <div className="rounded-2xl border border-[var(--brand-primary,#007c7c)] bg-white p-5 shadow-sm flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-[var(--brand-primary,#007c7c)]/10 text-[var(--brand-primary,#007c7c)] flex items-center justify-center text-2xl shadow-inner">📍</div>
+              <div>
+                <p className="text-3xl font-black text-slate-900">{(saleCount + rentCount).toLocaleString('en-GB')}</p>
+                <p className="text-xs tracking-wide text-slate-600 font-semibold">Listed or renting</p>
               </div>
             </div>
           </div>
@@ -597,19 +607,27 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
 
       <div className="flex-1 p-6 flex flex-col">
         <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
-          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-orange-500 flex-1 flex flex-col relative">
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200 flex-1 flex flex-col relative">
             {isLocating && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1001] bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
                 <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
                 <span className="font-semibold">Finding your location...</span>
               </div>
             )}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Street feed</p>
+                <p className="text-xs text-slate-500">Everyone&apos;s a little property-curious.</p>
+              </div>
+              <span className="text-xs px-3 py-1 rounded-full bg-orange-100 text-orange-700 font-semibold">Live beta</span>
+            </div>
             <div className="flex-1 w-full h-full">
               <ShopMap
                 center={mapCenter}
                 zoom={13}
                 onShopClick={(shop) => setSelectedHome(shop)}
                 currentUserId={currentUserId}
+                refreshSignal={mapRefreshSignal}
               />
             </div>
           </div>
@@ -626,7 +644,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                   onClick={() => setSelectedHome(null)}
                   className="text-gray-400 hover:text-gray-600 text-sm"
                 >
-                  ?o
+                  ×
                 </button>
               </div>
 
@@ -688,7 +706,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                   className="w-full bg-gray-100 text-gray-800 py-2 rounded-lg text-sm font-medium hover:bg-gray-200"
                   onClick={() => alert("Future: full property sheet")}
                 >
-                  See more ??'
+                  See more (coming soon)
                 </button>
               </div>
 
@@ -907,26 +925,24 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
             </div>
           )}
 
-          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border-4 border-orange-500 p-6">
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-[var(--brand-border,#e5e7eb)] p-6">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-black text-gray-900">
                 Homes in View
               </h2>
-              <div className="text-sm">
-                <span className="font-bold text-gray-900">{visibleShops.length}</span>
-                <span className="text-gray-600"> homes visible</span>
+              <div className="text-sm text-slate-600">
+                <span className="font-bold text-slate-900">{visibleShops.length.toLocaleString('en-GB')}</span>
+                <span className="text-slate-500"> homes visible</span>
               </div>
             </div>
 
             {visibleShops.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="text-6xl mb-4">🏠</div>
-                <p className="text-xl font-bold text-gray-700 mb-2">No homes found</p>
-                <p className="text-gray-600">
-                  Try zooming out or exploring another area to see homes
-                </p>
-              </div>
-            ) : (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">🏠</div>
+                  <p className="text-xl font-bold text-slate-800 mb-2">No homes found</p>
+                  <p className="text-slate-600">Try zooming out or exploring another area to see homes</p>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {visibleShops
                   .sort((a, b) => {
@@ -947,35 +963,46 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                     return (
                       <div
                         key={shop.id}
-                        className="bg-gradient-to-br from-amber-50 to-orange-100 border-orange-300 border-2 rounded-xl p-4 hover:shadow-lg transition-all cursor-pointer hover:scale-105"
+                        className="bg-white border border-[var(--brand-border,#e5e7eb)] rounded-xl p-4 hover:shadow-md transition-all cursor-pointer hover:-translate-y-1"
                         onClick={() => handleShopClick(shop)}
                       >
                         <div className="flex items-start justify-between gap-2 mb-2">
-                          <h3 className="font-bold text-lg text-gray-900 flex-1">
+                          <h3 className="font-bold text-lg text-slate-900 flex-1">
                             {label}
                           </h3>
-                          <span className="text-xs px-2 py-1 rounded-full font-semibold bg-amber-200 text-amber-800">
+                          <span
+                            className={clsx(
+                              'text-xs px-2 py-1 rounded-full font-semibold',
+                              shop.is_claimed
+                                ? 'bg-[var(--brand-primary,#007c7c)]/10 text-[var(--brand-primary,#007c7c)]'
+                                : 'bg-slate-100 text-slate-600'
+                            )}
+                          >
                             {shop.is_claimed ? 'Claimed' : 'Unclaimed'}
                           </span>
                         </div>
 
-                        <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                        <p className="text-sm text-slate-600 mb-2 line-clamp-2">
                           {address}
                         </p>
 
-                        <div className="flex items-center gap-2 mb-3 text-xs text-gray-500">
+                        <div className="flex items-center gap-2 mb-3 text-xs text-slate-500">
                           <span>📍</span>
-                          <span className="font-semibold">
+                          <span className="font-semibold text-slate-700">
                             {distance < 1
                               ? `${(distance * 1000).toFixed(0)}m away`
                               : `${distance.toFixed(1)}km away`}
                           </span>
                         </div>
 
-                        <div className="flex flex-wrap gap-2 mb-3 text-xs text-gray-600">
-                          {shop.is_for_sale && <span className="px-2 py-1 rounded-md bg-red-100 text-red-700 font-semibold">For sale</span>}
-                          {shop.is_for_rent && <span className="px-2 py-1 rounded-md bg-blue-100 text-blue-700 font-semibold">For rent</span>}
-                          {shop.is_open_to_talking && <span className="px-2 py-1 rounded-md bg-green-100 text-green-700 font-semibold">Open to talking</span>}
+                        <div className="flex flex-wrap gap-2 mb-3 text-xs text-slate-600">
+                          {shop.is_for_sale && <span className="px-2 py-1 rounded-md bg-slate-100 text-slate-700 font-semibold">For sale</span>}
+                          {shop.is_for_rent && <span className="px-2 py-1 rounded-md bg-slate-100 text-slate-700 font-semibold">For rent</span>}
+                          {shop.is_open_to_talking && (
+                            <span className="px-2 py-1 rounded-md bg-[var(--brand-primary,#007c7c)]/10 text-[var(--brand-primary,#007c7c)] font-semibold">
+                              Open to talking
+                            </span>
+                          )}
                         </div>
 
                         <button
@@ -983,7 +1010,7 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                             e.stopPropagation()
                             handleShopClick(shop)
                           }}
-                          className="w-full mt-2 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-bold transition-colors"
+                          className="w-full mt-2 px-3 py-2 bg-[var(--brand-primary,#007c7c)] text-white rounded-lg hover:bg-[#006868] text-sm font-semibold transition-colors"
                         >
                           View home
                         </button>
@@ -996,16 +1023,17 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
         </div>
       </div>
 
-      <footer className="bg-gray-900 text-white py-8 mt-auto">
+      <footer className="bg-slate-900 text-white py-8 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4">
             <div className="flex items-center gap-3">
-              <span className="text-3xl">�YO?</span>
-              <p className="font-bold text-lg">
-                Empowering the Bitcoin economy, one coffee at a time
-              </p>
+              <span className="text-3xl">🪺</span>
+              <div>
+                <p className="font-bold text-lg">Nest</p>
+                <p className="text-sm text-slate-300">Everyone&apos;s a little property-curious.</p>
+              </div>
             </div>
-            <div className="flex gap-6">
+            <div className="flex gap-6 text-sm">
               <a href="/about" className="font-bold hover:text-orange-400 transition-colors">
                 About
               </a>
@@ -1013,22 +1041,14 @@ export default function HomeClient({ shops: initialShops, user, isAdmin }: HomeC
                 href="https://github.com/profullstack/bitcoinlatte"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-bold hover:text-orange-400 transition-colors flex items-center gap-2"
+                className="font-bold hover:text-orange-400 transition-colors"
               >
-                GitHub <span>��-</span>
+                GitHub
               </a>
             </div>
           </div>
-          <div className="text-center text-sm text-gray-400 border-t border-gray-800 pt-4">
-            &copy; 2025{' '}
-            <a
-              href="https://profullstack.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-orange-400 transition-colors font-semibold"
-            >
-              Profullstack, Inc.
-            </a>
+          <div className="text-center text-sm text-slate-400 border-t border-slate-800 pt-4">
+            &copy; 2025 Nest · Built by Profullstack, Inc.
           </div>
         </div>
       </footer>

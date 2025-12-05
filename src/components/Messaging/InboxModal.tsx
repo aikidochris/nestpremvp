@@ -3,7 +3,10 @@ import clsx from 'clsx'
 import { X, Send, MessageSquareDashed } from 'lucide-react'
 import type { Thread } from '@/hooks/useInbox'
 
-type PartnerProfiles = Record<string, { display_name: string | null; email: string | null }>
+type PartnerProfiles = Record<
+  string,
+  { user_id: string; display_name: string | null; avatar_url: string | null }
+>
 
 interface InboxModalProps {
   open: boolean
@@ -14,13 +17,6 @@ interface InboxModalProps {
   onSend: (propertyId: string, body: string, receiverId?: string | null, status?: string) => Promise<any>
   onMarkRead?: (propertyId: string, partnerId: string | null) => void
   partnerProfiles?: PartnerProfiles
-}
-
-const maskEmail = (email?: string | null) => {
-  if (!email) return null
-  const [user, domain] = email.split('@')
-  if (!domain || user.length < 2) return email
-  return `${user[0]}...${user[user.length - 1]}@${domain}`
 }
 
 const getInitials = (name: string) => (name?.[0]?.toUpperCase() ?? '?')
@@ -36,7 +32,6 @@ const getPartnerNameForThread = (
   }
   const profile = partnerProfiles?.[thread.partnerId]
   if (profile?.display_name) return profile.display_name
-  if (profile?.email) return maskEmail(profile.email) ?? 'Verified User'
   return 'Verified User'
 }
 

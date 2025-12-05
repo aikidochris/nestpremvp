@@ -50,19 +50,18 @@ export async function GET(req: Request) {
       `
         id,
         uprn,
-        postcode,
-        street,
-        house_number,
         lat,
         lon,
-        price_estimate,
-        claimed_by_user_id,
+        street,
+        postcode,
+        house_number,
+        town,
+        display_label,
         is_claimed,
         is_open_to_talking,
         is_for_sale,
-        is_for_rent,
-        has_recent_activity
-        `
+        is_for_rent
+      `
     )
 
   if (hasBounds) {
@@ -88,7 +87,11 @@ export async function GET(req: Request) {
     query = query.eq('is_claimed', false)
   }
 
-  query = query.limit(LIMIT)
+  query = query
+    .order('is_open_to_talking', { ascending: false })
+    .order('is_claimed', { ascending: false })
+    .order('id', { ascending: true })
+    .limit(LIMIT)
 
   const { data, error } = await query
 
@@ -99,7 +102,7 @@ export async function GET(req: Request) {
       hint: error.hint,
       code: error.code,
     })
-
+    console.error(error.message, error.details)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 

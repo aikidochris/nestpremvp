@@ -52,6 +52,7 @@ function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
 }
 
 const INDIVIDUAL_MARKER_ZOOM = 16
+const CLUSTER_MAX_ZOOM = 15
 
 function buildDisplayLabel(property: MapProperty) {
   const { house_number, street, postcode } = property
@@ -123,6 +124,36 @@ export default function ShopMap({
     return m
   }, [properties])
 
+  const spiderfyPositions = useMemo(() => {
+    const grouped = new Map<string, MapProperty[]>()
+    properties.forEach((p) => {
+      const key = `${p.lat.toFixed(6)}|${p.lon.toFixed(6)}`
+      const list = grouped.get(key) ?? []
+      list.push(p)
+      grouped.set(key, list)
+    })
+
+    const offsets = new Map<string, [number, number]>()
+    grouped.forEach((list) => {
+      if (list.length === 1) {
+        offsets.set(list[0].id, [list[0].lat, list[0].lon])
+        return
+      }
+
+      const radiusMeters = 12
+      list.forEach((p, idx) => {
+        const angle = (2 * Math.PI * idx) / list.length
+        const deltaLat = (radiusMeters / 111320) * Math.cos(angle)
+        const deltaLon =
+          (radiusMeters / (111320 * Math.cos((p.lat * Math.PI) / 180) || 1)) *
+          Math.sin(angle)
+        offsets.set(p.id, [p.lat + deltaLat, p.lon + deltaLon])
+      })
+    })
+
+    return offsets
+  }, [properties])
+
   const geojsonPoints = useMemo(
     () =>
       properties.map((p) => ({
@@ -144,9 +175,33 @@ export default function ShopMap({
   )
 
   const clusterIndex = useMemo(() => {
-    const index = new Supercluster({ radius: 30, maxZoom: 19, minZoom: 0 })
+    const index = new Supercluster({
+      radius: 80,
+      maxZoom: CLUSTER_MAX_ZOOM,
+      minZoom: 0,
+      map: (props: any) => ({
+        openToTalkingCount: props.is_open_to_talking ? 1 : 0,
+        forSaleCount: props.is_for_sale ? 1 : 0,
+        forRentCount: props.is_for_rent ? 1 : 0,
+      }),
+      reduce: (accumulated: any, props: any) => {
+        accumulated.openToTalkingCount += props.openToTalkingCount ?? 0
+        accumulated.forSaleCount += props.forSaleCount ?? 0
+        accumulated.forRentCount += props.forRentCount ?? 0
+      },
+    })
     return index.load(geojsonPoints as any)
   }, [geojsonPoints])
+
+  const getClusterColor = (clusterProps: any) => {
+    if ((clusterProps?.forSaleCount ?? 0) > 0 || (clusterProps?.forRentCount ?? 0) > 0) {
+      return '#E65F52'
+    }
+    if ((clusterProps?.openToTalkingCount ?? 0) > 0) {
+      return '#007C7C'
+    }
+    return '#475569'
+  }
 
   const zoomLevel = map ? map.getZoom() : 0
 
@@ -182,7 +237,7 @@ export default function ShopMap({
       return
     }
 
-    const bounds = map.getBounds()
+    const bounds = map.getBounds().pad(0.1)
     const zoomValue = map.getZoom()
     const key = buildBoundsKey(bounds, zoomValue)
 
@@ -230,11 +285,26 @@ export default function ShopMap({
       }
 
       setProperties((prev) => {
-        const next = json.data ?? []
+        const raw = json.data ?? []
+        const next = (raw as any[]).map((item) => {
+          const flags = Array.isArray(item.intent_flags) ? item.intent_flags[0] : item.intent_flags
+          const signals = {
+            is_for_sale: flags?.is_for_sale ?? false,
+            is_for_rent: flags?.is_for_rent ?? false,
+            soft_listing: flags?.soft_listing ?? false,
+          }
+          return {
+            ...item,
+            signals,
+            is_for_sale: signals.is_for_sale,
+            is_for_rent: signals.is_for_rent,
+            is_open_to_talking: signals.soft_listing,
+          }
+        })
         const prevIds = prev.map((p) => p.id).join('|')
         const nextIds = next.map((p: MapProperty) => p.id).join('|')
         if (prevIds === nextIds) return prev
-        return next
+        return next as MapProperty[]
       })
 
       if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
@@ -260,7 +330,7 @@ export default function ShopMap({
       if (fetchTimeout.current) clearTimeout(fetchTimeout.current)
       fetchTimeout.current = setTimeout(() => {
         fetchForBounds()
-      }, 120)
+      }, 500)
     }
 
     // initial fetch
@@ -285,8 +355,7 @@ export default function ShopMap({
     fetchForBounds()
   }, [fetchForBounds, map, refreshSignal])
 
-  const createIcon = (color: string, isOwner: boolean) => {
-    const size = isOwner ? 22 : 18
+  const createSolidIcon = (color: string, size: number, isOwner: boolean) => {
     const borderWidth = isOwner ? 4 : 2
     const ring = isOwner ? 'box-shadow:0 0 0 2px rgba(0,0,0,0.1);' : ''
     return L.divIcon({
@@ -300,29 +369,64 @@ export default function ShopMap({
     })
   }
 
+  const createRingIcon = (borderColor: string, size: number) => {
+    const borderWidth = 2
+    return L.divIcon({
+      html: `
+        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid ${borderColor};background:#ffffff;border-radius:9999px;" aria-hidden="true"></div>
+      `,
+      className: 'nest-pin',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      popupAnchor: [0, -size / 2],
+    })
+  }
+
+  const createClusterIcon = (count: number, color: string) => {
+    const sizeClass = count < 20 ? 'w-10 h-10 text-sm' : count < 100 ? 'w-12 h-12 text-base' : 'w-14 h-14 text-lg'
+    const size = count < 20 ? 40 : count < 100 ? 48 : 56
+    return L.divIcon({
+      html: `
+        <div class="rounded-full text-white font-bold flex items-center justify-center border-4 border-white shadow-xl transition-transform hover:scale-110 ${sizeClass}" style="background:${color}">
+          ${count}
+        </div>
+      `,
+      className: 'nest-cluster',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      popupAnchor: [0, -size / 2],
+    })
+  }
+
   const getShopIcon = (property: MapProperty) => {
     const override = intentOverrides[property.id]
     const merged = override ? { ...property, ...override } : property
     const isOwner = !!currentUserId && merged.claimed_by_user_id === currentUserId
-    const isSale = merged.is_for_sale
-    const isRent = merged.is_for_rent
-    const isOpen = merged.is_open_to_talking
+    const isSale = merged.signals?.is_for_sale ?? merged.is_for_sale
+    const isRent = merged.signals?.is_for_rent ?? merged.is_for_rent
+    const isOpen = merged.signals?.soft_listing ?? merged.is_open_to_talking
     const isClaimed = merged.is_claimed
 
-    let color = '#9CA3AF' // grey default
+    // Priority: sale > rent > open > claimed > default (unclaimed)
     if (isSale) {
-      color = '#E65F52'
-    } else if (isRent) {
-      color = '#6366F1'
-    } else if (isOpen) {
-      color = '#007C7C'
-    } else if (isClaimed) {
-      color = '#F5A623'
+      const icon = createSolidIcon('#E65F52', 20, isOwner)
+      return { icon, zIndexOffset: isOwner ? 1000 : 600 }
+    }
+    if (isRent) {
+      const icon = createSolidIcon('#6366F1', 20, isOwner)
+      return { icon, zIndexOffset: isOwner ? 1000 : 600 }
+    }
+    if (isOpen) {
+      const icon = createSolidIcon('#007C7C', 20, isOwner)
+      return { icon, zIndexOffset: isOwner ? 1000 : 500 }
+    }
+    if (isClaimed) {
+      const icon = createSolidIcon('#475569', 18, isOwner)
+      return { icon, zIndexOffset: isOwner ? 1000 : 400 }
     }
 
-    const icon = createIcon(color, isOwner)
-    const zIndexOffset = isOwner ? 1000 : (isSale || isRent || isOpen ? 500 : 0)
-    return { icon, zIndexOffset }
+    const icon = createRingIcon('#CBD5E1', 12)
+    return { icon, zIndexOffset: 0 }
   }
 
   const handleClusterClick = useCallback(
@@ -330,7 +434,7 @@ export default function ShopMap({
       if (!map) return
       const expansionZoom = clusterIndex.getClusterExpansionZoom(cluster.id)
       const [lon, lat] = cluster.geometry.coordinates
-      map.setView([lat, lon], expansionZoom)
+      map.flyTo([lat, lon], expansionZoom, { animate: true })
     },
     [clusterIndex, map]
   )
@@ -349,18 +453,17 @@ export default function ShopMap({
     const isCluster = cluster.properties.cluster
 
     if (isCluster) {
-      // Keep basic cluster handling (expand on click) but reuse simple pin styling
       const count = cluster.properties.point_count
+      const color = getClusterColor({
+        openToTalkingCount: cluster.properties.openToTalkingCount,
+        forSaleCount: cluster.properties.forSaleCount,
+        forRentCount: cluster.properties.forRentCount,
+      })
       return (
         <Marker
           key={`cluster-${cluster.id}`}
           position={[lat, lon]}
-          icon={L.divIcon({
-            html: `<div class="bg-[#007C7C] text-white w-9 h-9 rounded-full flex items-center justify-center font-bold border-2 border-white shadow-lg">${count}</div>`,
-            className: 'nest-cluster',
-            iconSize: [36, 36],
-            iconAnchor: [18, 18],
-          })}
+          icon={createClusterIcon(count, color)}
           eventHandlers={{
             click: () => handleClusterClick(cluster),
           }}
@@ -373,6 +476,14 @@ export default function ShopMap({
 
     const override = intentOverrides[property.id]
     const displayProperty = override ? { ...property, ...override } : property
+
+    console.log('[ShopMap] marker flags', displayProperty.id, {
+      is_claimed: displayProperty.is_claimed,
+      is_for_sale: displayProperty.is_for_sale,
+      is_for_rent: displayProperty.is_for_rent,
+      is_open_to_talking: displayProperty.is_open_to_talking,
+    })
+
     const label = buildDisplayLabel(displayProperty)
     const address = displayProperty.postcode || displayProperty.street || 'No postcode'
     const { icon, zIndexOffset } = getShopIcon(displayProperty)
@@ -420,11 +531,12 @@ export default function ShopMap({
       const label = buildDisplayLabel(displayProperty)
       const address = displayProperty.postcode || displayProperty.street || 'No postcode'
       const { icon, zIndexOffset } = getShopIcon(displayProperty)
+      const position = spiderfyPositions.get(displayProperty.id) ?? [displayProperty.lat, displayProperty.lon]
 
       return (
         <Marker
           key={displayProperty.id}
-          position={[displayProperty.lat, displayProperty.lon]}
+          position={position as [number, number]}
           icon={icon}
           zIndexOffset={zIndexOffset}
           bubblingMouseEvents={false}
@@ -456,7 +568,7 @@ export default function ShopMap({
         </Marker>
       )
     })
-  }, [getShopIcon, intentOverrides, onShopClick, properties])
+  }, [getShopIcon, intentOverrides, onShopClick, properties, spiderfyPositions])
 
   return (
     <div className="relative w-full h-full">

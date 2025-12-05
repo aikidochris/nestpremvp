@@ -13,7 +13,7 @@ export default async function Home() {
   
   // Get current user
   const { data: { user } } = await supabase.auth.getUser()
-  
+
   // Fetch user profile to check admin status
   let isAdmin = false
   if (user) {
@@ -26,5 +26,19 @@ export default async function Home() {
     isAdmin = profile?.role === 'admin'
   }
   
-  return <HomeClient shops={shops || []} user={user} isAdmin={isAdmin} />
+  let followedPropertyIds: string[] = []
+
+  if (user) {
+    const { data: follows, error: followsError } = await supabase
+      .from('follows')
+      .select('property_id')
+      .eq('user_id', user.id)
+      .eq('follow_type', 'property')
+
+    if (!followsError && Array.isArray(follows)) {
+      followedPropertyIds = follows.map((f: any) => f.property_id).filter((id): id is string => !!id)
+    }
+  }
+  
+  return <HomeClient shops={shops || []} user={user} isAdmin={isAdmin} initialFollowedIds={followedPropertyIds} />
 }

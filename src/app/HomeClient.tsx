@@ -2,7 +2,7 @@
 
 import clsx from 'clsx'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useState, useCallback, useEffect, type ChangeEvent, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, type ChangeEvent, useRef } from 'react'
 import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame } from 'lucide-react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
@@ -10,8 +10,11 @@ import type L from 'leaflet'
 import { uploadHomeStoryImages } from '@/lib/storage'
 import type { MapProperty } from '@/components/Map/ShopMap'
 import FloatingControls from '@/components/Map/FloatingControls'
+import MapLegend from '@/components/Map/MapLegend'
 import InboxModal from '@/components/Messaging/InboxModal'
 import { useInbox } from '@/hooks/useInbox'
+import FollowButton from '@/components/Social/FollowButton'
+import { usePropertyFollows } from '@/hooks/usePropertyFollows'
 
 interface User {
   id: string
@@ -22,18 +25,20 @@ interface HomeClientProps {
   shops: MapProperty[]
   user: User | null
   isAdmin: boolean
+  initialFollowedIds?: string[]
 }
 
 type OwnerStatus = 'settled' | 'open' | 'sale' | 'rent'
 type MessageMode = 'direct' | 'note' | 'future'
 
-export default function HomeClient({ shops: initialShops, user: _user, isAdmin: _isAdmin }: HomeClientProps) {
+export default function HomeClient({ shops: initialShops, user: _user, isAdmin: _isAdmin, initialFollowedIds = [] }: HomeClientProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
   const enableGeolocation = false // keep code for future reintroduction
   const [searchQuery, setSearchQuery] = useState('')
   const [shops, setShops] = useState<MapProperty[]>(initialShops)
+  const [followedIds, setFollowedIds] = useState<string[]>(initialFollowedIds)
   const [mapCenter, setMapCenter] = useState<[number, number]>([54.9733, -1.6139]) // Default to Newcastle upon Tyne
   const [isLocating, setIsLocating] = useState(false)
   const [selectedHome, setSelectedHome] = useState<any | null>(null)
@@ -70,7 +75,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   }>>>({})
   const [mapRefreshSignal, setMapRefreshSignal] = useState(0)
   const [mapReady, setMapReady] = useState(false)
-  const [isListOpen, setIsListOpen] = useState<boolean>(true)
+  const [isListOpen, setIsListOpen] = useState<boolean>(false)
   const [activeFilter, setActiveFilter] = useState<'all' | 'open' | 'claimed'>('all')
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
@@ -87,10 +92,14 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const [pendingNotesLoading, setPendingNotesLoading] = useState(false)
   const [pendingNotesError, setPendingNotesError] = useState<string | null>(null)
   const [isInboxOpen, setIsInboxOpen] = useState(false)
+  const [currentBounds, setCurrentBounds] = useState<L.LatLngBounds | null>(null)
   const mapRef = useRef<L.Map | null>(null)
+  const mapMoveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingDeepLinkRef = useRef<MapProperty | null>(null)
   const deepLinkHandledRef = useRef<string | null>(null)
   const lastPendingUserKeyRef = useRef<string | null>(null)
+  const { isFollowed, toggleFollow } = usePropertyFollows()
 
   const refreshPendingRequestCount = useCallback(async (userId: string | null | undefined, propertyId: string | null | undefined) => {
     if (!userId || !propertyId) {
@@ -174,46 +183,72 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
     return R * c
   }, [])
 
-  const fetchUserShops = useCallback(async (center: [number, number], bounds?: L.LatLngBounds) => {
-    try {
-      const params = new URLSearchParams()
-
-      if (bounds) {
-        const sw = bounds.getSouthWest()
-        const ne = bounds.getNorthEast()
-        params.set('south', sw.lat.toString())
-        params.set('west', sw.lng.toString())
-        params.set('north', ne.lat.toString())
-        params.set('east', ne.lng.toString())
-      } else {
-        const [lat, lon] = center
-        const radiusKm = 10
-        const deltaLat = radiusKm / 111
-        const deltaLon = radiusKm / (111 * Math.cos((lat * Math.PI) / 180) || 1)
-        params.set('south', (lat - deltaLat).toString())
-        params.set('north', (lat + deltaLat).toString())
-        params.set('west', (lon - deltaLon).toString())
-        params.set('east', (lon + deltaLon).toString())
-      }
-
-      const url = `/api/properties?${params.toString()}`
-      const response = await fetch(url)
-
-      if (response.ok) {
-        const { data } = await response.json()
-        setShops(data || [])
-      } else {
-        console.error('Failed to fetch properties:', response.statusText)
-      }
-    } catch (error) {
-      console.error('Error fetching properties:', error)
+  const fetchUserShops = useCallback((center: [number, number], bounds?: L.LatLngBounds) => {
+    if (fetchDebounceRef.current) {
+      clearTimeout(fetchDebounceRef.current)
     }
+
+    fetchDebounceRef.current = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams()
+
+        if (bounds) {
+          const sw = bounds.getSouthWest()
+          const ne = bounds.getNorthEast()
+          params.set('south', sw.lat.toString())
+          params.set('west', sw.lng.toString())
+          params.set('north', ne.lat.toString())
+          params.set('east', ne.lng.toString())
+        } else {
+          const [lat, lon] = center
+          const radiusKm = 10
+          const deltaLat = radiusKm / 111
+          const deltaLon = radiusKm / (111 * Math.cos((lat * Math.PI) / 180) || 1)
+          params.set('south', (lat - deltaLat).toString())
+          params.set('north', (lat + deltaLat).toString())
+          params.set('west', (lon - deltaLon).toString())
+          params.set('east', (lon + deltaLon).toString())
+        }
+
+        const url = `/api/properties?${params.toString()}`
+        const response = await fetch(url)
+
+        if (response.ok) {
+          const { data } = await response.json()
+          setShops(data || [])
+        } else {
+          console.error('Failed to fetch properties:', response.statusText)
+        }
+      } catch (error) {
+        console.error('Error fetching properties:', error)
+      }
+    }, 500)
   }, [])
 
   const handleMapMove = useCallback((center: [number, number], bounds: L.LatLngBounds) => {
     setMapCenter(center)
+    setCurrentBounds((prev) => (prev && prev.equals(bounds) ? prev : bounds))
     fetchUserShops(center, bounds)
   }, [fetchUserShops])
+
+  const handleLocationSelect = useCallback((lat: number, lon: number) => {
+    const nextCenter: [number, number] = [lat, lon]
+    setMapCenter(nextCenter)
+    if (mapRef.current) {
+      mapRef.current.flyTo(nextCenter, 16)
+    }
+  }, [])
+
+  const onMapReady = useCallback((mapInstance: L.Map) => {
+    mapRef.current = mapInstance
+    setMapReady(true)
+    setCurrentBounds((prev) => prev ?? mapInstance.getBounds())
+    const pending = pendingDeepLinkRef.current
+    if (pending) {
+      mapInstance.flyTo([pending.lat, pending.lon], 18)
+      pendingDeepLinkRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     // When we change home, clear old claim state first
@@ -459,8 +494,40 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
     }
   }, []) // Only run once on mount
 
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return
+
+    const mapInstance = mapRef.current
+
+    const updateFromMap = () => {
+      if (mapMoveTimeoutRef.current) {
+        clearTimeout(mapMoveTimeoutRef.current)
+      }
+      mapMoveTimeoutRef.current = setTimeout(() => {
+        const center = mapInstance.getCenter()
+        const bounds = mapInstance.getBounds()
+        handleMapMove([center.lat, center.lng], bounds)
+      }, 250)
+    }
+
+    // initial sync
+    updateFromMap()
+
+    mapInstance.on('move', updateFromMap)
+    mapInstance.on('moveend', updateFromMap)
+
+    return () => {
+      if (mapMoveTimeoutRef.current) {
+        clearTimeout(mapMoveTimeoutRef.current)
+      }
+      mapInstance.off('move', updateFromMap)
+      mapInstance.off('moveend', updateFromMap)
+    }
+  }, [handleMapMove, mapReady])
+
   const handleShopClick = (shop: MapProperty) => {
     setSelectedHome(shop)
+    mapRef.current?.flyTo([shop.lat, shop.lon], 18, { animate: true, duration: 1.5 })
   }
 
   const buildDisplayLabel = useCallback((property: MapProperty) => {
@@ -1041,7 +1108,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
       return
     }
     refreshPendingRequestCount(userId, propertyId)
-  }, [currentUser?.id, isClaimedByYou, selectedHome?.id, refreshPendingRequestCount])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id])
 
   const selectedHomeTitle = selectedHome
     ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''}`.trim() ||
@@ -1095,23 +1163,31 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
     if (!mapReady || !mapRef.current) return
     if (deepLinkHandledRef.current === propertyId && !openInbox) return
 
-    const handleDeepLink = async () => {
-      let target = shops.find((s) => s.id === propertyId) ?? null
+    const fetchProperty = async (): Promise<MapProperty | null> => {
+      const existing = shops.find((s) => s.id === propertyId)
+      if (existing) return existing
 
-      if (!target) {
-        const { data, error } = await supabase
-          .from('properties_public_view')
-          .select('*')
-          .eq('id', propertyId)
-          .single()
+      const { data, error } = await supabase
+        .from('properties_public_view')
+        .select('*')
+        .eq('id', propertyId)
+        .single()
 
-        if (error) {
-          console.error('Deep link supabase error', error)
-        } else if (data) {
-          target = data as any
-          setShops((prev) => (prev.some((p) => p.id === target!.id) ? prev : [...prev, target!]))
-        }
+      if (error) {
+        console.error('Deep link supabase error', error)
+        return null
       }
+
+      if (data) {
+        const casted = data as MapProperty
+        setShops((prev) => (prev.some((p) => p.id === casted.id) ? prev : [...prev, casted]))
+        return casted
+      }
+      return null
+    }
+
+    const handleDeepLink = async () => {
+      const target = await fetchProperty()
 
       if (!target) return
 
@@ -1131,7 +1207,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
     }
 
     handleDeepLink()
-  }, [searchParams, shops, supabase, mapReady])
+  }, [searchParams, supabase, mapReady])
 
   const filteredShops = shops.filter((home) => {
     if (activeFilter === 'open' && !home.is_open_to_talking) return false
@@ -1152,7 +1228,20 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
 
     return true
   })
-  const visibleShops = filteredShops
+  const visibleShops = useMemo(
+    () =>
+      filteredShops.filter((shop) =>
+        currentBounds ? currentBounds.contains([shop.lat, shop.lon]) : true
+      ),
+    [filteredShops, currentBounds]
+  )
+  const activeShops = useMemo(
+    () =>
+      visibleShops.filter(
+        (s) => s.is_open_to_talking || s.is_claimed || s.is_for_sale || s.is_for_rent
+      ),
+    [visibleShops]
+  )
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return
@@ -1169,26 +1258,19 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         <ShopMap
           center={mapCenter}
           zoom={13}
-        onShopClick={(shop) => setSelectedHome(shop)}
+        onShopClick={handleShopClick}
         currentUserId={currentUserId}
         refreshSignal={mapRefreshSignal}
         activeFilter={activeFilter}
         intentOverrides={intentOverrides}
-        onMapReady={(mapInstance) => {
-          mapRef.current = mapInstance
-          setMapReady(true)
-          const pending = pendingDeepLinkRef.current
-          if (pending) {
-            mapInstance.flyTo([pending.lat, pending.lon], 18)
-            pendingDeepLinkRef.current = null
-          }
-        }}
+        onMapReady={onMapReady}
       />
       </div>
 
       <FloatingControls
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        onLocationSelect={handleLocationSelect}
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
         isListOpen={isListOpen}
@@ -1197,9 +1279,29 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         onLogout={handleLogout}
         onOpenInbox={() => setIsInboxOpen(true)}
       />
+      <div className="z-40">
+        <MapLegend />
+      </div>
+
+      {!isListOpen && (
+        <div className="absolute left-4 top-24 z-30 hidden md:flex">
+          <button
+            type="button"
+            onClick={() => setIsListOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md border border-white/30 px-4 py-2 text-sm font-semibold text-slate-800 shadow-lg hover:bg-white transition"
+          >
+            {activeShops.length.toLocaleString('en-GB')} Active Homes
+          </button>
+        </div>
+      )}
 
       {isListOpen && (
-        <div className="absolute left-4 top-28 bottom-4 w-80 bg-white/90 backdrop-blur-md border-r border-white/20 shadow-2xl rounded-xl overflow-y-auto z-20 hidden md:block transition-all duration-300 ease-out">
+        <div
+          className={clsx(
+            "fixed inset-x-0 bottom-0 h-[40vh] w-full rounded-t-2xl border-t border-white/20 bg-white/90 backdrop-blur-md shadow-2xl overflow-y-auto z-20 transition-all duration-300 ease-out",
+            "md:fixed md:left-4 md:top-28 md:bottom-4 md:w-80 md:h-auto md:rounded-xl md:border md:border-white/20"
+          )}
+        >
           <div className="p-4 border-b border-slate-200 flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-800">Homes in view</p>
@@ -1218,29 +1320,31 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
                 <MessageCircle className="h-4 w-4 text-[#007C7C]" />
                 <p className="text-xs font-semibold text-slate-700">Open</p>
                 <p className="text-sm font-bold text-slate-900">
-                  {visibleShops.filter((home) => home.is_open_to_talking).length}
+                  {activeShops.filter((home) => home.is_open_to_talking).length}
                 </p>
               </div>
               <div className="flex flex-col items-center gap-1">
                 <Flame className="h-4 w-4 text-[#E65F52]" />
                 <p className="text-xs font-semibold text-slate-700">Active</p>
                 <p className="text-sm font-bold text-slate-900">
-                  {visibleShops.filter((home) => home.is_for_sale || home.is_for_rent).length}
+                  {activeShops.filter((home) => home.is_for_sale || home.is_for_rent).length}
                 </p>
               </div>
               <div className="flex flex-col items-center gap-1">
                 <HomeIcon className="h-4 w-4 text-[#F5A623]" />
                 <p className="text-xs font-semibold text-slate-700">Claimed</p>
                 <p className="text-sm font-bold text-slate-900">
-                  {visibleShops.filter((home) => home.is_claimed).length}
+                  {activeShops.filter((home) => home.is_claimed).length}
                 </p>
               </div>
             </div>
 
-            {visibleShops.length === 0 ? (
-              <div className="text-sm text-slate-500 text-center py-6">Move the map to see homes.</div>
+            {activeShops.length === 0 ? (
+              <div className="text-sm text-slate-500 text-center py-6">
+                No active signals in this view. Be the first to claim!
+              </div>
             ) : (
-              visibleShops.map((home) => {
+              activeShops.map((home) => {
                 const label = buildDisplayLabel(home)
                 const address = buildAddressLine(home)
                 const isOpen = !!home.is_open_to_talking
@@ -1249,12 +1353,12 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
                 const containerClasses = clsx(
                   "w-full text-left mb-3 p-3 rounded-xl border border-transparent transition-all hover:scale-[1.02] hover:shadow-md cursor-pointer bg-white/60 backdrop-blur-md",
                   isOpen
-                    ? "border-l-4 border-l-[#007C7C] bg-teal-50/30"
+                    ? "border-l-4 border-l-teal-500 bg-teal-50/30"
                     : isActive
-                      ? "border-l-4 border-l-[#E65F52] bg-red-50/30"
+                      ? "border-l-4 border-l-rose-500 bg-red-50/30"
                       : isClaimed
-                        ? "border-l-4 border-l-[#F5A623]"
-                        : ""
+                        ? "border-l-4 border-l-slate-500"
+                        : "border-l-4 border-l-gray-200"
                 )
                 const badgeClasses = clsx(
                   "text-[11px] px-2 py-1 rounded-full font-semibold",
@@ -1263,7 +1367,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
                     : isActive
                       ? "bg-[#E65F52]/10 text-[#E65F52]"
                       : isClaimed
-                        ? "bg-[#F5A623]/10 text-[#B45309]"
+                        ? "bg-slate-100 text-slate-700 border border-slate-200"
                         : "bg-slate-100 text-slate-600"
                 )
                 const badgeLabel = isOpen
@@ -1296,16 +1400,33 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
       )}
 
       {selectedHome && (
-        <div className="fixed right-4 top-24 bottom-4 w-80 bg-white/95 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-2xl p-0 z-40 min-h-[600px] flex flex-col overflow-hidden transition-all duration-300 ease-out">
+        <div
+          className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/95 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[60] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
+        >
           {/* Hero */}
           <div className="relative h-64 w-full bg-slate-100 group">
-            <button
-              onClick={() => setSelectedHome(null)}
-              className="absolute top-3 right-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
-              aria-label="Close"
-            >
-              &times;
-            </button>
+            <div className="absolute top-3 right-3 z-20 flex items-center gap-3">
+              <FollowButton
+                propertyId={selectedHome.id}
+                initialIsFollowed={followedIds.includes(selectedHome.id)}
+                onToggleSuccess={(isNowFollowed) => {
+                  setFollowedIds((prev) => {
+                    if (isNowFollowed) {
+                      if (prev.includes(selectedHome.id)) return prev
+                      return [...prev, selectedHome.id]
+                    }
+                    return prev.filter((id) => id !== selectedHome.id)
+                  })
+                }}
+              />
+              <button
+                onClick={() => setSelectedHome(null)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
             {storyLoading && !storyMatchesSelection ? (
               <div className="h-full w-full bg-slate-200 animate-pulse" />
             ) : displayImages.length === 0 ? (

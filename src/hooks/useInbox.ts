@@ -13,7 +13,10 @@ type MessageRow = {
 }
 
 type PropertyLabelLookup = Record<string, string>
-type PartnerProfiles = Record<string, { display_name: string | null; email: string | null }>
+type PartnerProfiles = Record<
+  string,
+  { user_id: string; display_name: string | null; avatar_url: string | null }
+>
 
 export type Thread = {
   threadKey: string
@@ -100,7 +103,7 @@ export function useInbox(currentUserId: string | null) {
     try {
       const { data: profiles, error: profileError } = await supabase
         .from('profiles')
-        .select('user_id, id, display_name, email')
+        .select('user_id, display_name, avatar_url')
         .in('user_id', uniqueIds)
 
       if (profileError) {
@@ -108,9 +111,13 @@ export function useInbox(currentUserId: string | null) {
       } else if (profiles) {
         const lookup: PartnerProfiles = {}
         profiles.forEach((p: any) => {
-          const key = p.user_id ?? p.id
+          const key = p.user_id
           if (!key) return
-          lookup[key] = { display_name: p.display_name ?? null, email: p.email ?? null }
+          lookup[key] = {
+            user_id: key,
+            display_name: p.display_name ?? null,
+            avatar_url: p.avatar_url ?? null,
+          }
         })
         setPartnerProfiles((prev) => ({ ...prev, ...lookup }))
       }

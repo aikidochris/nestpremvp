@@ -1,13 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import React from 'react'
+import { Home, Flame, GraduationCap, TrainFront } from 'lucide-react'
 
+// Defined types for our "Life Layers"
 export interface LayerState {
-  BTC: boolean
-  BCH: boolean
-  LTC: boolean
-  XMR: boolean
-  userShops: boolean
+  homes: boolean
+  heat: boolean
+  schools: boolean
+  transport: boolean
 }
 
 interface LayerToggleProps {
@@ -15,120 +16,81 @@ interface LayerToggleProps {
   onLayerChange: (layers: LayerState) => void
 }
 
-const CRYPTO_INFO = {
-  BTC: { name: 'Bitcoin', color: 'bg-primary', emoji: '₿' },
-  BCH: { name: 'Bitcoin Cash', color: 'bg-green-500', emoji: '💚' },
-  LTC: { name: 'Litecoin', color: 'bg-blue-500', emoji: '🔷' },
-  XMR: { name: 'Monero', color: 'bg-purple-500', emoji: '🔒' },
-}
-
 export default function LayerToggle({ layers, onLayerChange }: LayerToggleProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
 
-  const toggleLayer = (layer: keyof LayerState) => {
-    const newLayers = { ...layers, [layer]: !layers[layer] }
-    onLayerChange(newLayers)
+  const toggle = (key: keyof LayerState) => {
+    onLayerChange({ ...layers, [key]: !layers[key] })
   }
 
-  const activeCount = Object.values(layers).filter(Boolean).length
-
   return (
-    <div className="absolute top-4 right-4 z-[1000] bg-white rounded-lg shadow-xl border-2 border-gray-200">
-      {/* Header */}
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 transition-colors rounded-t-lg"
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-xl">🗺️</span>
-          <span className="font-bold text-gray-900">Map Layers</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold px-2 py-1 bg-primary/10 text-primary rounded-full">
-            {activeCount} active
-          </span>
-          <span className={`text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
-            ▼
-          </span>
-        </div>
-      </button>
+    <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-[1000]">
+      <div className="flex items-center gap-1 p-1.5 bg-white/90 backdrop-blur-md rounded-full border border-white/20 shadow-xl ring-1 ring-black/5">
 
-      {/* Layer Controls */}
-      {isExpanded && (
-        <div className="border-t border-gray-200">
-          {/* User Shops Toggle */}
-          <div className="px-4 py-3 border-b border-gray-100">
-            <label className="flex items-center gap-3 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={layers.userShops}
-                onChange={() => toggleLayer('userShops')}
-                className="w-5 h-5 rounded border-2 border-gray-300 text-amber-600 focus:ring-2 focus:ring-amber-500 cursor-pointer"
-              />
-              <div className="flex items-center gap-2 flex-1">
-                <span className="text-2xl">🏪</span>
-                <div>
-                  <div className="font-semibold text-gray-900 group-hover:text-amber-600 transition-colors">
-                    User Shops
-                  </div>
-                  <div className="text-xs text-gray-500">Community submitted</div>
-                </div>
-              </div>
-              <div className={`w-3 h-3 rounded-full ${layers.userShops ? 'bg-primary' : 'bg-gray-300'}`} />
-            </label>
-          </div>
+        {/* Homes Switch */}
+        <button
+          onClick={() => toggle('homes')}
+          className={`
+            relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all
+            ${layers.homes
+              ? 'bg-slate-900 text-white shadow-md'
+              : 'text-slate-600 hover:bg-slate-100'
+            }
+          `}
+        >
+          <Home size={16} className={layers.homes ? 'text-teal-400' : 'text-slate-400'} />
+          Homes
+        </button>
 
-          {/* OSM Crypto Layers */}
-          <div className="px-4 py-2">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
-              OpenStreetMap Crypto
-            </div>
-            {(Object.keys(CRYPTO_INFO) as Array<keyof typeof CRYPTO_INFO>).map((crypto) => {
-              const info = CRYPTO_INFO[crypto]
-              return (
-                <label
-                  key={crypto}
-                  className="flex items-center gap-3 py-2 cursor-pointer group"
-                >
-                  <input
-                    type="checkbox"
-                    checked={layers[crypto]}
-                    onChange={() => toggleLayer(crypto)}
-                    className="w-5 h-5 rounded border-2 border-gray-300 text-primary focus:ring-2 focus:ring-primary cursor-pointer"
-                  />
-                  <div className="flex items-center gap-2 flex-1">
-                    <span className="text-xl">{info.emoji}</span>
-                    <div>
-                      <div className="font-semibold text-gray-900 group-hover:text-primary transition-colors">
-                        {info.name}
-                      </div>
-                      <div className="text-xs text-gray-500">{crypto}</div>
-                    </div>
-                  </div>
-                  <div className={`w-3 h-3 rounded-full ${layers[crypto] ? info.color : 'bg-gray-300'}`} />
-                </label>
-              )
-            })}
-          </div>
+        <div className="w-px h-6 bg-slate-200 mx-1" />
 
-          {/* Legend */}
-          <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 rounded-b-lg">
-            <div className="text-xs text-gray-600">
-              <div className="font-semibold mb-1">Legend:</div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-primary" />
-                  <span>User-submitted shops</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-primary" />
-                  <span>OSM crypto shops</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        {/* Heat Switch */}
+        <button
+          onClick={() => toggle('heat')}
+          className={`
+             relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all
+             ${layers.heat
+              ? 'bg-slate-900 text-white shadow-md'
+              : 'text-slate-600 hover:bg-slate-100'
+            }
+          `}
+        >
+          <Flame size={16} className={layers.heat ? 'text-orange-500' : 'text-slate-400'} />
+          Heat
+        </button>
+
+        <div className="w-px h-6 bg-slate-200 mx-1" />
+
+        {/* Schools Switch */}
+        <button
+          onClick={() => toggle('schools')}
+          className={`
+             relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all
+             ${layers.schools
+              ? 'bg-slate-900 text-white shadow-md'
+              : 'text-slate-600 hover:bg-slate-100'
+            }
+          `}
+        >
+          <GraduationCap size={16} className={layers.schools ? 'text-blue-400' : 'text-slate-400'} />
+          Schools
+        </button>
+
+        {/* Transport Switch */}
+        <button
+          onClick={() => toggle('transport')}
+          className={`
+             relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all
+             ${layers.transport
+              ? 'bg-slate-900 text-white shadow-md'
+              : 'text-slate-600 hover:bg-slate-100'
+            }
+          `}
+        >
+          <TrainFront size={16} className={layers.transport ? 'text-emerald-400' : 'text-slate-400'} />
+          Transport
+        </button>
+
+      </div>
     </div>
   )
 }

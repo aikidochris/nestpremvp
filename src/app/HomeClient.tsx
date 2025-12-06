@@ -6,6 +6,8 @@ import { useState, useCallback, useEffect, useMemo, type ChangeEvent, useRef } f
 import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame } from 'lucide-react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
+import LayerToggle, { LayerState } from '@/components/Map/LayerToggle'
+import ActivityFeedDrawer from '@/components/Feed/ActivityFeedDrawer'
 import type L from 'leaflet'
 import { uploadHomeStoryImages } from '@/lib/storage'
 import type { MapProperty } from '@/components/Map/ShopMap'
@@ -92,6 +94,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const [pendingNotesLoading, setPendingNotesLoading] = useState(false)
   const [pendingNotesError, setPendingNotesError] = useState<string | null>(null)
   const [isInboxOpen, setIsInboxOpen] = useState(false)
+  const [isActivityOpen, setIsActivityOpen] = useState(false)
   const [currentBounds, setCurrentBounds] = useState<L.LatLngBounds | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const mapMoveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -100,6 +103,13 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const deepLinkHandledRef = useRef<string | null>(null)
   const lastPendingUserKeyRef = useRef<string | null>(null)
   const { isFollowed, toggleFollow } = usePropertyFollows()
+  const [heatmapMode, setHeatmapMode] = useState<'all' | 'market' | 'social' | null>(null)
+  const [layerState, setLayerState] = useState<LayerState>({
+    homes: true,
+    heat: false,
+    schools: false,
+    transport: false,
+  })
 
   const refreshPendingRequestCount = useCallback(async (userId: string | null | undefined, propertyId: string | null | undefined) => {
     if (!userId || !propertyId) {
@@ -137,17 +147,17 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
     async function loadUser() {
       setAuthLoading(true)
       const { data, error } = await supabase.auth.getUser()
-        if (!mounted) return
+      if (!mounted) return
 
-        if (!error) {
-          setCurrentUser(data.user ?? null)
-          if (data.user) {
-            refreshPendingRequestCount(data.user.id)
-          }
-        } else {
-          console.error('[Auth] getUser error', error)
-          setCurrentUser(null)
+      if (!error) {
+        setCurrentUser(data.user ?? null)
+        if (data.user) {
+          refreshPendingRequestCount(data.user.id)
         }
+      } else {
+        console.error('[Auth] getUser error', error)
+        setCurrentUser(null)
+      }
       setAuthLoading(false)
     }
 
@@ -176,10 +186,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
     const R = 6371
     const dLat = (lat2 - lat1) * Math.PI / 180
     const dLon = (lon2 - lon1) * Math.PI / 180
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     return R * c
   }, [])
 
@@ -986,7 +996,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const isClaimedByYou = isOwner
   const ownerStatus: OwnerStatus = localForSale
     ? 'sale'
-      : localForRent
+    : localForRent
       ? 'rent'
       : isOpenToTalking
         ? 'open'
@@ -1119,8 +1129,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
 
   const selectedHomeTitle = selectedHome
     ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''}`.trim() ||
-        selectedHome?.name ||
-        'Home')
+      selectedHome?.name ||
+      'Home')
     : ''
   const selectedHomeAddress = selectedHome
     ? (selectedHome?.postcode ?? selectedHome?.street ?? 'No address')
@@ -1144,10 +1154,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
     setMessageBody('')
     setMessageError(null)
     setMessageMode('direct')
-      setMessageHeader('Message Owner')
-      setMessageSubtext(null)
-      setMessageSuccess(null)
-      setMessageSending(false)
+    setMessageHeader('Message Owner')
+    setMessageSubtext(null)
+    setMessageSuccess(null)
+    setMessageSending(false)
   }, [selectedHome?.id])
 
   const handleLogout = async () => {
@@ -1264,14 +1274,18 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         <ShopMap
           center={mapCenter}
           zoom={13}
-        onShopClick={handleShopClick}
-        currentUserId={currentUserId}
-        refreshSignal={mapRefreshSignal}
-        activeFilter={activeFilter}
-        intentOverrides={intentOverrides}
-        onMapReady={onMapReady}
-      />
+          onShopClick={handleShopClick}
+          currentUserId={currentUserId}
+          refreshSignal={mapRefreshSignal}
+          activeFilter={activeFilter}
+          intentOverrides={intentOverrides}
+          onMapReady={onMapReady}
+          heatmapMode={layerState.heat ? 'all' : null}
+          activeLayers={layerState}
+        />
       </div>
+
+      <LayerToggle layers={layerState} onLayerChange={setLayerState} />
 
       <FloatingControls
         searchQuery={searchQuery}
@@ -1284,6 +1298,14 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenInbox={() => setIsInboxOpen(true)}
+        onOpenActivity={() => setIsActivityOpen(true)}
+        heatmapMode={heatmapMode}
+        onSetHeatmapMode={setHeatmapMode}
+      />
+      <ActivityFeedDrawer
+        userId={currentUser?.id}
+        isOpen={isActivityOpen}
+        onClose={() => setIsActivityOpen(false)}
       />
       <div className="z-40">
         <MapLegend />
@@ -1480,16 +1502,16 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
                   </>
                 )}
 
-                    {isClaimedByYou && (
-                      <>
-                        <button
-                          type="button"
-                          className="absolute top-3 right-12 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
-                          onClick={() => fileInputRef.current?.click()}
-                          aria-label="Add photo"
-                        >
-                          <Plus className="h-5 w-5" />
-                        </button>
+                {isClaimedByYou && (
+                  <>
+                    <button
+                      type="button"
+                      className="absolute top-3 right-12 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label="Add photo"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </button>
                     <button
                       type="button"
                       className="absolute top-3 left-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-red-600 shadow hover:bg-white"
@@ -1730,11 +1752,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
                       ) : (
                         <p className="text-sm text-gray-500">No home story yet.</p>
                       )}
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
 
             {isClaimedByYou && (editingStory || !homeStory) && (
               <button
@@ -1770,9 +1792,9 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         </div>
       )}
 
-    {isMessageModalOpen && (
-      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
-        <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+      {isMessageModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
             <div className="flex items-start justify-between border-b border-slate-200 p-4">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">{messageHeader}</h3>

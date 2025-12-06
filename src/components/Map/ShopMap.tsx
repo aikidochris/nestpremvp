@@ -6,6 +6,10 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
 import type { LatLngBounds } from 'leaflet'
+import { getSupabaseClient } from '@/lib/supabaseClient'
+import HeatmapOverlay, { type HeatmapPoint } from './HeatmapLayer'
+import type { LayerState } from './LayerToggle'
+import PoiLayer from './PoiLayer'
 
 // Fix for default marker icons in Next.js
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -30,6 +34,11 @@ export type MapProperty = {
   is_for_sale: boolean
   is_for_rent: boolean
   has_recent_activity: boolean
+  signals?: {
+    is_for_sale: boolean
+    is_for_rent: boolean
+    soft_listing: boolean
+  }
 }
 
 interface ShopMapProps {
@@ -41,6 +50,8 @@ interface ShopMapProps {
   activeFilter?: 'all' | 'open' | 'claimed'
   intentOverrides?: Record<string, Partial<Pick<MapProperty, 'is_for_sale' | 'is_for_rent' | 'is_open_to_talking' | 'is_claimed' | 'claimed_by_user_id'>>>
   onMapReady?: (map: L.Map) => void
+  heatmapMode?: 'all' | 'market' | 'social' | null
+  activeLayers?: LayerState
 }
 
 function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
@@ -77,10 +88,21 @@ export default function ShopMap({
   activeFilter = 'all',
   intentOverrides = {},
   onMapReady,
+  heatmapMode = null,
+  activeLayers,
 }: ShopMapProps) {
-  console.log('[ShopMap] render')
   const [map, setMap] = useState<L.Map | null>(null)
+
+  // Poi Types
+  const poiTypes = useMemo(() => {
+    const types: string[] = []
+    if (activeLayers?.schools) types.push('school')
+    if (activeLayers?.transport) types.push('transport')
+    return types
+  }, [activeLayers?.schools, activeLayers?.transport])
+
   const [properties, setProperties] = useState<MapProperty[]>([])
+  const [heatmapPoints, setHeatmapPoints] = useState<HeatmapPoint[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showLoadingBadge, setShowLoadingBadge] = useState(false)
 
@@ -95,12 +117,18 @@ export default function ShopMap({
   const abortControllerRef = useRef<AbortController | null>(null)
   const fetchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressFetchUntil = useRef<number>(0)
+  const supabase = getSupabaseClient()
 
   useEffect(() => {
     setFilterOpen(activeFilter === 'open')
     setFilterClaimed(activeFilter === 'claimed' ? 'claimed' : 'all')
     lastFetchKey.current = null
   }, [activeFilter])
+
+  // Reset fetch key when switching modes so we force a refresh
+  useEffect(() => {
+    lastFetchKey.current = null
+  }, [heatmapMode])
 
   useEffect(() => {
     if (map && onMapReady) {
@@ -114,9 +142,9 @@ export default function ShopMap({
       const south = bounds.getSouth().toFixed(6)
       const east = bounds.getEast().toFixed(6)
       const west = bounds.getWest().toFixed(6)
-      return `${north}|${south}|${east}|${west}|${zoomValue}|${filterOpen}|${filterForSale}|${filterForRent}|${filterClaimed}`
+      return `${north}|${south}|${east}|${west}|${zoomValue}|${filterOpen}|${filterForSale}|${filterForRent}|${filterClaimed}|${heatmapMode}`
     },
-    [filterClaimed, filterForRent, filterForSale, filterOpen]
+    [filterClaimed, filterForRent, filterForSale, filterOpen, heatmapMode]
   )
 
   const propertyMap = useMemo(() => {
@@ -216,7 +244,7 @@ export default function ShopMap({
     const west = bounds.getWest()
 
     return clusterIndex.getClusters([west, south, east, north], zoomLevel)
-  }, [clusterIndex, map, viewport, zoomLevel])
+  }, [clusterIndex, map, viewport, zoomLevel, heatmapMode])
 
   // Delay showing the loading badge to avoid flicker on quick pans/zooms
   useEffect(() => {
@@ -242,7 +270,6 @@ export default function ShopMap({
     const zoomValue = map.getZoom()
     const key = buildBoundsKey(bounds, zoomValue)
 
-    // Prevent tight loops when Leaflet fires multiple move/zoom events with same viewport/filters
     if (key === lastFetchKey.current) {
       return
     }
@@ -262,88 +289,95 @@ export default function ShopMap({
     const controller = new AbortController()
     abortControllerRef.current = controller
 
-    const params = new URLSearchParams()
-    params.set('north', bounds.getNorth().toString())
-    params.set('south', bounds.getSouth().toString())
-    params.set('east', bounds.getEast().toString())
-    params.set('west', bounds.getWest().toString())
-    params.set('filter_open', String(filterOpen))
-    params.set('filter_for_sale', String(filterForSale))
-    params.set('filter_for_rent', String(filterForRent))
-    params.set('filter_claimed', filterClaimed)
-
-    const url = `/api/properties?${params.toString()}`
-    console.log('[ShopMap] fetching properties', url)
+    setIsLoading(true)
 
     try {
-      setIsLoading(true)
-      const res = await fetch(url, { signal: controller.signal })
-      const json = await res.json()
+      if (heatmapMode) {
+        // RPC Call for Heatmap
+        const params = {
+          north: bounds.getNorth(),
+          south: bounds.getSouth(),
+          east: bounds.getEast(),
+          west: bounds.getWest(),
+          mode: heatmapMode
+        }
+        console.log('[ShopMap] fetching heatmap points', params)
 
-      console.log(
-        '[ShopMap DEBUG] Claimed Status Sample:',
-        (json?.data ?? []).slice(0, 10).map((p: any) => ({
-          id: p?.id,
-          postcode: p?.postcode,
-          claimed: p?.is_claimed,
-        }))
-      )
+        const { data, error } = await supabase.rpc('get_heatmap_points', params as any)
 
-      console.log('[ShopMap] /api/properties response', {
-        status: res.status,
-        count: Array.isArray(json.data) ? json.data.length : 0,
-        truncated: json.truncated,
-      })
+        if (error) {
+          console.error('[ShopMap] heatmap fetch error', JSON.stringify(error, null, 2))
+          // Fallback to empty array on error to prevent UI crash
+          setHeatmapPoints([])
+        } else {
+          setHeatmapPoints(data as HeatmapPoint[] ?? [])
+        }
+      } else {
+        // Standard API Call
+        const params = new URLSearchParams()
+        params.set('north', bounds.getNorth().toString())
+        params.set('south', bounds.getSouth().toString())
+        params.set('east', bounds.getEast().toString())
+        params.set('west', bounds.getWest().toString())
+        params.set('filter_open', String(filterOpen))
+        params.set('filter_for_sale', String(filterForSale))
+        params.set('filter_for_rent', String(filterForRent))
+        params.set('filter_claimed', filterClaimed)
 
-      if (!res.ok) {
-        console.error('[ShopMap] error from /api/properties', json)
-        return
-      }
+        const url = `/api/properties?${params.toString()}`
 
-      setProperties((prev) => {
-        const raw = json.data ?? []
-        const next = (raw as any[]).map((item) => {
-          const signals = {
-            is_for_sale: item?.is_for_sale ?? false,
-            is_for_rent: item?.is_for_rent ?? false,
-            soft_listing: item?.is_open_to_talking ?? false,
-          }
-          return {
-            ...item,
-            signals,
-            is_claimed: item?.is_claimed ?? false,
-            is_for_sale: signals.is_for_sale,
-            is_for_rent: signals.is_for_rent,
-            is_open_to_talking: signals.soft_listing,
-          }
+        const res = await fetch(url, { signal: controller.signal })
+        const json = await res.json()
+
+        if (!res.ok) {
+          console.error('[ShopMap] error from /api/properties', json)
+          return
+        }
+
+        setProperties((prev) => {
+          const raw = json.data ?? []
+          const next = (raw as any[]).map((item) => {
+            const signals = {
+              is_for_sale: item?.is_for_sale ?? false,
+              is_for_rent: item?.is_for_rent ?? false,
+              soft_listing: item?.is_open_to_talking ?? false,
+            }
+            return {
+              ...item,
+              signals,
+              is_claimed: item?.is_claimed ?? false,
+              is_for_sale: signals.is_for_sale,
+              is_for_rent: signals.is_for_rent,
+              is_open_to_talking: signals.soft_listing,
+            }
+          })
+          const prevIds = prev.map((p) => p.id).join('|')
+          const nextIds = next.map((p: MapProperty) => p.id).join('|')
+          if (prevIds === nextIds) return prev
+          return next as MapProperty[]
         })
-        const prevIds = prev.map((p) => p.id).join('|')
-        const nextIds = next.map((p: MapProperty) => p.id).join('|')
-        if (prevIds === nextIds) return prev
-        return next as MapProperty[]
-      })
 
-      if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
-        const fitBounds = L.latLngBounds(json.data.map((p: MapProperty) => [p.lat, p.lon] as [number, number]))
-        map.fitBounds(fitBounds)
-        hasFitBounds.current = true
+        if (!hasFitBounds.current && map && Array.isArray(json.data) && json.data.length > 0) {
+          const fitBounds = L.latLngBounds(json.data.map((p: MapProperty) => [p.lat, p.lon] as [number, number]))
+          map.fitBounds(fitBounds)
+          hasFitBounds.current = true
+        }
       }
     } catch (err) {
       if ((err as any)?.name === 'AbortError') {
         return
       }
-      console.error('[ShopMap] network error fetching properties', err)
-      // Keep existing properties to avoid unmounting markers on transient errors
+      console.error('[ShopMap] network error', err)
     } finally {
       if (abortControllerRef.current === controller) {
         setIsLoading(false)
       }
     }
-  }, [buildBoundsKey, filterClaimed, filterForRent, filterForSale, filterOpen, map])
+  }, [buildBoundsKey, filterClaimed, filterForRent, filterForSale, filterOpen, heatmapMode, map, supabase])
 
   useEffect(() => {
     if (!map) {
-      console.log('[ShopMap] map not ready yet')
+      // console.log('[ShopMap] map not ready yet')
       return
     }
 
@@ -354,10 +388,8 @@ export default function ShopMap({
       }, 500)
     }
 
-    // initial fetch
     debouncedFetch()
 
-    // refetch on move/zoom
     map.on('moveend', debouncedFetch)
     map.on('zoomend', debouncedFetch)
 
@@ -370,7 +402,6 @@ export default function ShopMap({
     }
   }, [fetchForBounds, map])
 
-  // Trigger a refresh when parent signals (e.g., after toggling open-to-conversation)
   useEffect(() => {
     if (!map) return
     fetchForBounds()
@@ -428,7 +459,6 @@ export default function ShopMap({
     const isOpen = merged.signals?.soft_listing ?? merged.is_open_to_talking
     const isClaimed = merged.is_claimed
 
-    // Priority: sale > rent > open > claimed > default (unclaimed)
     if (isSale) {
       const icon = createSolidIcon('#E65F52', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
@@ -498,13 +528,6 @@ export default function ShopMap({
     const override = intentOverrides[property.id]
     const displayProperty = override ? { ...property, ...override } : property
 
-    console.log('[ShopMap] marker flags', displayProperty.id, {
-      is_claimed: displayProperty.is_claimed,
-      is_for_sale: displayProperty.is_for_sale,
-      is_for_rent: displayProperty.is_for_rent,
-      is_open_to_talking: displayProperty.is_open_to_talking,
-    })
-
     const label = buildDisplayLabel(displayProperty)
     const address = displayProperty.postcode || displayProperty.street || 'No postcode'
     const { icon, zIndexOffset } = getShopIcon(displayProperty)
@@ -520,7 +543,6 @@ export default function ShopMap({
         eventHandlers={{
           click: (e) => {
             suppressFetchUntil.current = Date.now() + 300
-            // @ts-expect-error Leaflet originalEvent
             e?.originalEvent?.stopPropagation?.()
             onShopClick?.(displayProperty)
           },
@@ -546,6 +568,7 @@ export default function ShopMap({
   }
 
   const markers = useMemo(() => {
+
     return properties.map((property) => {
       const override = intentOverrides[property.id]
       const displayProperty = override ? { ...property, ...override } : property
@@ -565,7 +588,6 @@ export default function ShopMap({
           eventHandlers={{
             click: (e) => {
               suppressFetchUntil.current = Date.now() + 300
-              // @ts-expect-error Leaflet originalEvent
               e?.originalEvent?.stopPropagation?.()
               onShopClick?.(displayProperty)
             },
@@ -589,7 +611,7 @@ export default function ShopMap({
         </Marker>
       )
     })
-  }, [getShopIcon, intentOverrides, onShopClick, properties, spiderfyPositions])
+  }, [getShopIcon, intentOverrides, onShopClick, properties, spiderfyPositions, heatmapMode])
 
   return (
     <div className="relative w-full h-full">
@@ -614,9 +636,20 @@ export default function ShopMap({
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         />
 
-        {map && zoomLevel >= INDIVIDUAL_MARKER_ZOOM
-          ? markers
-          : clusters.map((cluster: any) => renderClusterOrMarker(cluster))}
+        {heatmapMode && (
+          <HeatmapOverlay points={heatmapPoints} mode={heatmapMode} />
+        )}
+
+        {(activeLayers?.homes ?? true) && (
+          <>
+            {map && zoomLevel >= INDIVIDUAL_MARKER_ZOOM
+              ? markers
+              : clusters.map((cluster: any) => renderClusterOrMarker(cluster))}
+          </>
+        )}
+
+        {/* POI Layer */}
+        {poiTypes.length > 0 && <PoiLayer visibleTypes={poiTypes} />}
       </MapContainer>
     </div>
   )

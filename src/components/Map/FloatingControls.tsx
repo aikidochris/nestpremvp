@@ -1,6 +1,7 @@
 import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon } from "lucide-react";
+import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon, RefreshCw, Flame, MessageCircle, Globe } from "lucide-react";
+import NotificationBell from "@/components/Notifications/NotificationBell";
 
 type FilterValue = "all" | "open" | "claimed";
 
@@ -12,9 +13,12 @@ interface FloatingControlsProps {
   onFilterChange: (value: FilterValue) => void;
   isListOpen?: boolean;
   onToggleList?: () => void;
-  currentUser?: { email?: string | null } | null;
+  currentUser?: { id?: string; email?: string | null } | null;
   onLogout?: () => void;
   onOpenInbox?: () => void;
+  onOpenActivity?: () => void;
+  heatmapMode?: 'all' | 'market' | 'social' | null;
+  onSetHeatmapMode?: (mode: 'all' | 'market' | 'social' | null) => void;
 }
 
 const chips: Array<{ label: string; value: FilterValue; activeClass?: string }> = [
@@ -34,6 +38,9 @@ export default function FloatingControls({
   currentUser,
   onLogout,
   onOpenInbox,
+  onOpenActivity,
+  heatmapMode,
+  onSetHeatmapMode,
 }: FloatingControlsProps) {
   const [suggestions, setSuggestions] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -143,6 +150,16 @@ export default function FloatingControls({
     }
   };
 
+  const isHeatmapActive = !!heatmapMode;
+
+  const handleToggleHeatmap = () => {
+    if (isHeatmapActive) {
+      onSetHeatmapMode?.(null);
+    } else {
+      onSetHeatmapMode?.('all');
+    }
+  };
+
   return (
     <div className="pointer-events-none absolute top-4 left-0 right-0 z-50 px-4">
       <div className="relative flex flex-col gap-3">
@@ -182,9 +199,8 @@ export default function FloatingControls({
                       key={`${item.display_name}-${idx}`}
                       type="button"
                       onClick={() => handleSuggestionClick(item)}
-                      className={`flex w-full items-start p-3 text-left text-sm text-slate-700 hover:bg-teal-50 cursor-pointer border-t border-slate-100 first:border-t-0 truncate ${
-                        idx === highlightedIndex ? "bg-teal-50" : ""
-                      }`}
+                      className={`flex w-full items-start p-3 text-left text-sm text-slate-700 hover:bg-teal-50 cursor-pointer border-t border-slate-100 first:border-t-0 truncate ${idx === highlightedIndex ? "bg-teal-50" : ""
+                        }`}
                     >
                       <span className="truncate">{item.display_name}</span>
                     </button>
@@ -193,7 +209,8 @@ export default function FloatingControls({
               )}
             </div>
           </div>
-          <div className="pointer-events-auto absolute top-0 right-0">
+          <div className="pointer-events-auto absolute top-0 right-0 flex items-center gap-3">
+            <NotificationBell userId={currentUser?.id} />
             {!currentUser ? (
               <a
                 href="/auth/login"
@@ -221,10 +238,22 @@ export default function FloatingControls({
                       type="button"
                       onClick={() => {
                         setMenuOpen(false);
+                        onOpenActivity?.();
+                      }}
+                      className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Activity Feed
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
                         onOpenInbox?.();
                       }}
                       className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
                     >
+                      <MessageCircle className="h-4 w-4" />
                       Messages
                     </button>
                     <a
@@ -258,7 +287,7 @@ export default function FloatingControls({
           </div>
         </div>
 
-        <div className="pointer-events-auto flex gap-2 overflow-x-auto pb-1">
+        <div className="pointer-events-auto flex gap-2 overflow-x-auto pb-1 items-center">
           {chips.map((chip) => {
             const isActive = activeFilter === chip.value;
             return (
@@ -277,6 +306,8 @@ export default function FloatingControls({
               </button>
             );
           })}
+
+
         </div>
       </div>
     </div>

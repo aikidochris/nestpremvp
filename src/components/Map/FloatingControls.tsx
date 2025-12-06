@@ -1,16 +1,12 @@
 import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon, RefreshCw, Flame, MessageCircle, Globe } from "lucide-react";
+import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon, RefreshCw, Flame, MessageCircle, Globe, SlidersHorizontal } from "lucide-react";
 import NotificationBell from "@/components/Notifications/NotificationBell";
-
-type FilterValue = "all" | "open" | "claimed";
 
 interface FloatingControlsProps {
   searchQuery: string;
   onSearchChange: (value: string) => void;
   onLocationSelect: (lat: number, lon: number) => void;
-  activeFilter: FilterValue;
-  onFilterChange: (value: FilterValue) => void;
   isListOpen?: boolean;
   onToggleList?: () => void;
   currentUser?: { id?: string; email?: string | null } | null;
@@ -19,20 +15,13 @@ interface FloatingControlsProps {
   onOpenActivity?: () => void;
   heatmapMode?: 'all' | 'market' | 'social' | null;
   onSetHeatmapMode?: (mode: 'all' | 'market' | 'social' | null) => void;
+  onOpenFilters?: () => void;
 }
-
-const chips: Array<{ label: string; value: FilterValue; activeClass?: string }> = [
-  { label: "Show All", value: "all" },
-  { label: "Open to Talking", value: "open", activeClass: "bg-primary text-white" },
-  { label: "Claimed", value: "claimed", activeClass: "bg-secondary text-white" },
-];
 
 export default function FloatingControls({
   searchQuery,
   onSearchChange,
   onLocationSelect,
-  activeFilter,
-  onFilterChange,
   isListOpen,
   onToggleList,
   currentUser,
@@ -41,6 +30,7 @@ export default function FloatingControls({
   onOpenActivity,
   heatmapMode,
   onSetHeatmapMode,
+  onOpenFilters
 }: FloatingControlsProps) {
   const [suggestions, setSuggestions] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -190,8 +180,20 @@ export default function FloatingControls({
                 onKeyDown={handleKeyDown}
                 ref={inputRef}
                 placeholder="Search streets, postcodes..."
-                className="w-full rounded-full bg-white/80 backdrop-blur-md shadow-xl border border-white/20 px-4 py-3 pl-10 text-sm font-medium text-brand-dark placeholder:text-slate-400 ring-1 ring-slate-200/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-full bg-white/80 backdrop-blur-md shadow-xl border border-white/20 px-4 py-3 pl-10 pr-12 text-sm font-medium text-brand-dark placeholder:text-slate-400 ring-1 ring-slate-200/60 focus:outline-none focus:ring-2 focus:ring-primary"
               />
+
+              {/* Filter Button inside Search Bar */}
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                <div className="w-px h-5 bg-slate-200 mx-1"></div>
+                <button
+                  onClick={onOpenFilters}
+                  className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 hover:text-slate-800 transition-colors"
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                </button>
+              </div>
+
               {showSuggestions && suggestions.length > 0 && (
                 <div className="absolute left-0 right-0 mt-2 max-h-60 overflow-y-auto rounded-2xl bg-white/95 backdrop-blur-md shadow-2xl ring-1 ring-slate-200 z-[100]">
                   {suggestions.map((item, idx) => (
@@ -287,28 +289,6 @@ export default function FloatingControls({
           </div>
         </div>
 
-        <div className="pointer-events-auto flex gap-2 overflow-x-auto pb-1 items-center">
-          {chips.map((chip) => {
-            const isActive = activeFilter === chip.value;
-            return (
-              <button
-                key={chip.value}
-                type="button"
-                onClick={() => onFilterChange(chip.value)}
-                className={[
-                  "whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold transition",
-                  isActive
-                    ? chip.activeClass ?? "bg-slate-900 text-white"
-                    : "bg-white/90 backdrop-blur-sm shadow-sm text-slate-700 border-slate-200 hover:border-primary hover:text-primary",
-                ].join(" ")}
-              >
-                {chip.label}
-              </button>
-            );
-          })}
-
-
-        </div>
       </div>
     </div>
   );

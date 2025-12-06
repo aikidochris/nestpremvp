@@ -54,8 +54,8 @@ export default function LayerToggle({ layers, onLayerChange }: LayerToggleProps)
             }
           `}
         >
-          <Flame size={16} className={layers.heat ? 'text-orange-500' : 'text-slate-400'} />
-          Heat
+          <Flame size={16} className={layers.heat ? 'text-purple-500' : 'text-slate-400'} />
+          Buzz
         </button>
 
         <div className="w-px h-6 bg-slate-200 mx-1" />

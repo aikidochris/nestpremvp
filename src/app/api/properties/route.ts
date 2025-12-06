@@ -26,13 +26,16 @@ export async function GET(req: Request) {
     const filterForRent = url.searchParams.get('filter_for_rent')
     const filterClaimed = url.searchParams.get('filter_claimed')
 
-    const LIMIT = 2000
+    const LIMIT = 15000
 
     const hasBounds =
       !Number.isNaN(north) &&
       !Number.isNaN(south) &&
       !Number.isNaN(east) &&
       !Number.isNaN(west)
+
+    const LAUNCH_POSTCODES = ['NE25', 'NE26', 'NE27', 'NE29', 'NE30']
+    console.log('[API] Launch Mode: Active (Limit: 15k, Area: North Tyneside)')
 
     console.log('[API /properties] params', {
       north,
@@ -63,26 +66,26 @@ export async function GET(req: Request) {
       `
       )
 
+    // Data Fence: North Tyneside Coast Launch
+    query = query.or('postcode.ilike.NE25%,postcode.ilike.NE26%,postcode.ilike.NE27%,postcode.ilike.NE29%,postcode.ilike.NE30%')
+
     if (hasBounds) {
       query = query.gte('lat', south).lte('lat', north).gte('lon', west).lte('lon', east)
     }
 
     // Filters
-    if (filterOpen === 'true') {
-      query = query.eq('is_open_to_talking', true)
-    }
+    // Filters (OR logic for discovery)
+    const orConditions: string[] = []
 
-    if (filterForSale === 'true') {
-      query = query.eq('is_for_sale', true)
-    }
+    if (filterOpen === 'true') orConditions.push('is_open_to_talking.eq.true')
+    if (filterForSale === 'true') orConditions.push('is_for_sale.eq.true')
+    if (filterForRent === 'true') orConditions.push('is_for_rent.eq.true')
+    if (filterClaimed === 'claimed') orConditions.push('is_claimed.eq.true')
 
-    if (filterForRent === 'true') {
-      query = query.eq('is_for_rent', true)
-    }
-
-    if (filterClaimed === 'claimed') {
-      query = query.eq('is_claimed', true)
+    if (orConditions.length > 0) {
+      query = query.or(orConditions.join(','))
     } else if (filterClaimed === 'unclaimed') {
+      // Explicit negative filter if requested alone (legacy support)
       query = query.eq('is_claimed', false)
     }
 

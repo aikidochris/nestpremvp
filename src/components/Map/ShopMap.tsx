@@ -7,8 +7,10 @@ import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
 import type { LatLngBounds } from 'leaflet'
 import { getSupabaseClient } from '@/lib/supabaseClient'
+import HeatmapLegend from './HeatmapLegend'
 import HeatmapOverlay, { type HeatmapPoint } from './HeatmapLayer'
 import type { LayerState } from './LayerToggle'
+import type { FilterState } from '../UI/FilterModal'
 import PoiLayer from './PoiLayer'
 
 // Fix for default marker icons in Next.js
@@ -34,6 +36,7 @@ export type MapProperty = {
   is_for_sale: boolean
   is_for_rent: boolean
   has_recent_activity: boolean
+  image_url?: string | null
   signals?: {
     is_for_sale: boolean
     is_for_rent: boolean
@@ -47,12 +50,17 @@ interface ShopMapProps {
   onShopClick?: (property: MapProperty) => void
   currentUserId?: string | null
   refreshSignal?: number
-  activeFilter?: 'all' | 'open' | 'claimed'
+  filters?: FilterState
   intentOverrides?: Record<string, Partial<Pick<MapProperty, 'is_for_sale' | 'is_for_rent' | 'is_open_to_talking' | 'is_claimed' | 'claimed_by_user_id'>>>
   onMapReady?: (map: L.Map) => void
   heatmapMode?: 'all' | 'market' | 'social' | null
   activeLayers?: LayerState
 }
+
+const PILOT_BOUNDS: L.LatLngBoundsExpression = [
+  [54.990, -1.560], // South-West (Expanded South/West)
+  [55.070, -1.390], // North-East (Expanded North/East)
+]
 
 function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
   const m = useMap()
@@ -79,13 +87,21 @@ function buildDisplayLabel(property: MapProperty) {
   return 'Home'
 }
 
+const DEFAULT_FILTERS: FilterState = {
+  showAll: true,
+  openToTalking: false,
+  forSale: false,
+  forRent: false,
+  claimed: false
+}
+
 export default function ShopMap({
   center = [54.9749, -1.6103],
   zoom = 14,
   onShopClick,
   currentUserId,
   refreshSignal = 0,
-  activeFilter = 'all',
+  filters = DEFAULT_FILTERS,
   intentOverrides = {},
   onMapReady,
   heatmapMode = null,
@@ -106,10 +122,6 @@ export default function ShopMap({
   const [isLoading, setIsLoading] = useState(false)
   const [showLoadingBadge, setShowLoadingBadge] = useState(false)
 
-  const [filterOpen, setFilterOpen] = useState<boolean>(false)
-  const filterForSale = false
-  const filterForRent = false
-  const [filterClaimed, setFilterClaimed] = useState<'all' | 'claimed' | 'unclaimed'>('all')
 
   const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
   const hasFitBounds = useRef(false)
@@ -119,16 +131,10 @@ export default function ShopMap({
   const suppressFetchUntil = useRef<number>(0)
   const supabase = getSupabaseClient()
 
-  useEffect(() => {
-    setFilterOpen(activeFilter === 'open')
-    setFilterClaimed(activeFilter === 'claimed' ? 'claimed' : 'all')
-    lastFetchKey.current = null
-  }, [activeFilter])
-
   // Reset fetch key when switching modes so we force a refresh
   useEffect(() => {
     lastFetchKey.current = null
-  }, [heatmapMode])
+  }, [heatmapMode, filters])
 
   useEffect(() => {
     if (map && onMapReady) {
@@ -142,9 +148,10 @@ export default function ShopMap({
       const south = bounds.getSouth().toFixed(6)
       const east = bounds.getEast().toFixed(6)
       const west = bounds.getWest().toFixed(6)
-      return `${north}|${south}|${east}|${west}|${zoomValue}|${filterOpen}|${filterForSale}|${filterForRent}|${filterClaimed}|${heatmapMode}`
+      const f = filters
+      return `${north}|${south}|${east}|${west}|${zoomValue}|${f.showAll}|${f.openToTalking}|${f.forSale}|${f.forRent}|${f.claimed}|${heatmapMode}`
     },
-    [filterClaimed, filterForRent, filterForSale, filterOpen, heatmapMode]
+    [filters, heatmapMode]
   )
 
   const propertyMap = useMemo(() => {
@@ -203,6 +210,9 @@ export default function ShopMap({
     [properties]
   )
 
+  // Debug: Ensure we are passing all 16000+ points to Supercluster, not just active ones
+  // console.log('[ShopMap] Total points for clustering:', geojsonPoints.length)
+
   const clusterIndex = useMemo(() => {
     const index = new Supercluster({
       radius: 80,
@@ -214,22 +224,27 @@ export default function ShopMap({
         forRentCount: props.is_for_rent ? 1 : 0,
       }),
       reduce: (accumulated: any, props: any) => {
-        accumulated.openToTalkingCount += props.openToTalkingCount ?? 0
-        accumulated.forSaleCount += props.forSaleCount ?? 0
-        accumulated.forRentCount += props.forRentCount ?? 0
+        accumulated.count = (accumulated.count || 0) + 1
+        accumulated.openToTalkingCount += props.openToTalkingCount || 0
+        accumulated.forSaleCount += props.forSaleCount || 0
+        accumulated.forRentCount += props.forRentCount || 0
       },
     })
     return index.load(geojsonPoints as any)
   }, [geojsonPoints])
 
   const getClusterColor = (clusterProps: any) => {
+    // Priority 1: Market Signal (For Sale / Rent) -> Coral
     if ((clusterProps?.forSaleCount ?? 0) > 0 || (clusterProps?.forRentCount ?? 0) > 0) {
       return '#E65F52'
     }
+    // Priority 2: Social Signal (Open to Talking) -> Teal
     if ((clusterProps?.openToTalkingCount ?? 0) > 0) {
       return '#007C7C'
     }
-    return '#475569'
+    // Priority 3: Default / Unclaimed / No Signal -> Slate 500
+    // This ensures grey clusters are visible for density
+    return '#64748B' // slate-500
   }
 
   const zoomLevel = map ? map.getZoom() : 0
@@ -244,7 +259,7 @@ export default function ShopMap({
     const west = bounds.getWest()
 
     return clusterIndex.getClusters([west, south, east, north], zoomLevel)
-  }, [clusterIndex, map, viewport, zoomLevel, heatmapMode])
+  }, [clusterIndex, map, zoomLevel, heatmapMode])
 
   // Delay showing the loading badge to avoid flicker on quick pans/zooms
   useEffect(() => {
@@ -319,10 +334,10 @@ export default function ShopMap({
         params.set('south', bounds.getSouth().toString())
         params.set('east', bounds.getEast().toString())
         params.set('west', bounds.getWest().toString())
-        params.set('filter_open', String(filterOpen))
-        params.set('filter_for_sale', String(filterForSale))
-        params.set('filter_for_rent', String(filterForRent))
-        params.set('filter_claimed', filterClaimed)
+        params.set('filter_open', String(filters.openToTalking))
+        params.set('filter_for_sale', String(filters.forSale))
+        params.set('filter_for_rent', String(filters.forRent))
+        params.set('filter_claimed', filters.claimed ? 'claimed' : 'all')
 
         const url = `/api/properties?${params.toString()}`
 
@@ -349,6 +364,7 @@ export default function ShopMap({
               is_for_sale: signals.is_for_sale,
               is_for_rent: signals.is_for_rent,
               is_open_to_talking: signals.soft_listing,
+              image_url: item?.images?.[0] ?? null,
             }
           })
           const prevIds = prev.map((p) => p.id).join('|')
@@ -373,11 +389,10 @@ export default function ShopMap({
         setIsLoading(false)
       }
     }
-  }, [buildBoundsKey, filterClaimed, filterForRent, filterForSale, filterOpen, heatmapMode, map, supabase])
+  }, [buildBoundsKey, filters, heatmapMode, map, supabase])
 
   useEffect(() => {
     if (!map) {
-      // console.log('[ShopMap] map not ready yet')
       return
     }
 
@@ -515,6 +530,7 @@ export default function ShopMap({
           key={`cluster-${cluster.id}`}
           position={[lat, lon]}
           icon={createClusterIcon(count, color)}
+          zIndexOffset={1000} // Ensure clusters are always on top
           eventHandlers={{
             click: () => handleClusterClick(cluster),
           }}
@@ -628,6 +644,9 @@ export default function ShopMap({
         scrollWheelZoom={true}
         zoomControl={false}
         style={{ width: '100%', height: '100%' }}
+        maxBounds={PILOT_BOUNDS}
+        minZoom={12}
+        maxBoundsViscosity={0.8}
       >
         <MapInstanceCatcher onReady={setMap} />
         <ZoomControl position="bottomright" />
@@ -651,6 +670,8 @@ export default function ShopMap({
         {/* POI Layer */}
         {poiTypes.length > 0 && <PoiLayer visibleTypes={poiTypes} />}
       </MapContainer>
+      {heatmapMode && <HeatmapLegend />}
+      {/* Ensure Legend sits above map but below modals. MapContainer has z=0/auto? Legend has z=[1000] */}
     </div>
   )
 }

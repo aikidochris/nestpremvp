@@ -6,7 +6,7 @@ create or replace function get_heatmap_points(
   south double precision,
   east double precision,
   west double precision,
-  mode text default 'all'
+  mode text default 'all' -- Kept for signature compatibility, but ignored or treated as Buzz
 )
 returns table (
   lat double precision,
@@ -27,18 +27,14 @@ begin
   select
     p.lat,
     p.lon,
-    -- Calculation Logic
+    -- "The Demand Layer" Algorithm
     least(1.0,
-      greatest(
-        -- Level 3: Action (0.8)
-        case when coalesce(i.is_for_sale, false) or coalesce(i.is_for_rent, false) then 0.8 else 0 end,
-        -- Level 2: Interest (0.5)
-        case when coalesce(i.soft_listing, false) then 0.5 else 0 end,
-        -- Level 1: Buzz (0.2)
-        case when pc.user_id is not null or coalesce(fc.f_count, 0) > 0 then 0.2 else 0 end
-      ) +
-      -- Booster: +0.1 for every 5 follows
-      (floor(coalesce(fc.f_count, 0) / 5.0) * 0.1)
+      -- 1. Claimed Status (+0.3)
+      (case when pc.user_id is not null then 0.3 else 0 end) +
+      -- 2. Soft Listing / Open to Talking (+0.5)
+      (case when coalesce(i.soft_listing, false) then 0.5 else 0 end) +
+      -- 3. Follows (+0.2 per follow)
+      (coalesce(fc.f_count, 0) * 0.2)
     )::double precision as intensity
   from properties p
   left join property_claims pc on p.id = pc.property_id
@@ -46,18 +42,12 @@ begin
   left join follow_counts fc on p.id = fc.property_id
   where p.lat >= south and p.lat <= north
     and p.lon >= west and p.lon <= east
-    -- Filter out zero intensity (The Demand Map concept: empty space is dark)
+    -- Only show points with NON-ZERO demand (Buzz)
+    -- This ensures we don't return a sea of 0.0 points
     and (
-      greatest(
-        case when coalesce(i.is_for_sale, false) or coalesce(i.is_for_rent, false) then 0.8 else 0 end,
-        case when coalesce(i.soft_listing, false) then 0.5 else 0 end,
-        case when pc.user_id is not null or coalesce(fc.f_count, 0) > 0 then 0.2 else 0 end
-      ) > 0
-    )
-    and (
-      mode = 'all'
-      or (mode = 'market' and (coalesce(i.is_for_sale, false) or coalesce(i.is_for_rent, false)))
-      or (mode = 'social' and (pc.user_id is not null or coalesce(i.soft_listing, false) or coalesce(fc.f_count, 0) > 0))
+      (pc.user_id is not null) or
+      coalesce(i.soft_listing, false) or
+      coalesce(fc.f_count, 0) > 0
     );
 end;
 $$;

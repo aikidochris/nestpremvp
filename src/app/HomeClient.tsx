@@ -3,7 +3,7 @@
 import clsx from 'clsx'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState, useCallback, useEffect, useMemo, type ChangeEvent, useRef } from 'react'
-import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame } from 'lucide-react'
+import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame, Share2 } from 'lucide-react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
 import LayerToggle, { LayerState } from '@/components/Map/LayerToggle'
@@ -17,6 +17,9 @@ import InboxModal from '@/components/Messaging/InboxModal'
 import { useInbox } from '@/hooks/useInbox'
 import FollowButton from '@/components/Social/FollowButton'
 import { usePropertyFollows } from '@/hooks/usePropertyFollows'
+import FilterModal, { FilterState } from '@/components/UI/FilterModal'
+import AreaInsightsPanel from '@/components/Map/AreaInsightsPanel'
+
 
 interface User {
   id: string
@@ -41,7 +44,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const [searchQuery, setSearchQuery] = useState('')
   const [shops, setShops] = useState<MapProperty[]>(initialShops)
   const [followedIds, setFollowedIds] = useState<string[]>(initialFollowedIds)
-  const [mapCenter, setMapCenter] = useState<[number, number]>([54.9733, -1.6139]) // Default to Newcastle upon Tyne
+  const [mapCenter, setMapCenter] = useState<[number, number]>([55.035, -1.470]) // Default to Shiremoor/Monkseaton for Pilot
   const [isLocating, setIsLocating] = useState(false)
   const [selectedHome, setSelectedHome] = useState<any | null>(null)
   const [claimRecord, setClaimRecord] = useState<any | null>(null)
@@ -78,7 +81,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const [mapRefreshSignal, setMapRefreshSignal] = useState(0)
   const [mapReady, setMapReady] = useState(false)
   const [isListOpen, setIsListOpen] = useState<boolean>(false)
-  const [activeFilter, setActiveFilter] = useState<'all' | 'open' | 'claimed'>('all')
+
+
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
   const [messageMode, setMessageMode] = useState<MessageMode>('direct')
@@ -140,6 +144,16 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   }, [supabase])
 
   const { threads, loading: inboxLoading, partnerProfiles, sendMessage: inboxSendMessage, markThreadRead } = useInbox(currentUser?.id ?? null)
+
+  // Filters
+  const [showFilters, setShowFilters] = useState(false)
+  const [filters, setFilters] = useState<FilterState>({
+    showAll: true,
+    openToTalking: false,
+    forSale: false,
+    forRent: false,
+    claimed: false,
+  })
 
   useEffect(() => {
     let mounted = true
@@ -1226,20 +1240,36 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   }, [searchParams, supabase, mapReady])
 
   const filteredShops = shops.filter((home) => {
-    if (activeFilter === 'open' && !home.is_open_to_talking) return false
-    if (activeFilter === 'claimed' && !home.is_claimed) return false
-
     if (searchQuery.trim()) {
       const haystack = [
         home.house_number ?? '',
         home.street ?? '',
         home.postcode ?? '',
-        home.name ?? '',
       ]
         .join(' ')
         .toLowerCase()
       const needle = searchQuery.trim().toLowerCase()
       if (!haystack.includes(needle)) return false
+    }
+
+    // Apply FilterModal filters
+    if (!filters.showAll) {
+      const isSale = home.is_for_sale
+      const isRent = home.is_for_rent
+      const isOpen = home.is_open_to_talking
+      const isClaimed = home.is_claimed
+
+      // Logic: if any tag matches, keep it. Since we are in an OR block of enabled filters?
+      // Usually multiple filters means OR relation in this UI context (e.g. show "For Sale" AND "Open").
+      // Wait, "Show For Sale AND Open" -> homes that match any of selected?
+      // Let's assume OR between selected properties.
+      let match = false
+      if (filters.openToTalking && isOpen) match = true
+      if (filters.forSale && isSale) match = true
+      if (filters.forRent && isRent) match = true
+      if (filters.claimed && isClaimed) match = true
+
+      if (!match) return false
     }
 
     return true
@@ -1251,13 +1281,36 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
       ),
     [filteredShops, currentBounds]
   )
-  const activeShops = useMemo(
-    () =>
-      visibleShops.filter(
-        (s) => s.is_open_to_talking || s.is_claimed || s.is_for_sale || s.is_for_rent
-      ),
-    [visibleShops]
-  )
+
+  const activeShops = visibleShops
+
+  // Ghost Search Logging
+  const lastLoggedQuery = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!searchQuery || searchQuery.trim().length < 3) return
+
+    const timeout = setTimeout(async () => {
+      // Only log if 0 results and we are stable (not loading generic map data)
+      // Note: isLoading check removed. Relies on debounce.
+      // If filteredShops is 0, it means either:
+      // 1. We have data but filter matched nothing (Valid Ghost Search)
+      // 2. We moved map but found no homes in that area (Valid Ghost Search)
+      if (filteredShops.length === 0 && searchQuery !== lastLoggedQuery.current) {
+        console.log('[Ghost Search Detected]', searchQuery)
+        lastLoggedQuery.current = searchQuery
+
+        await (supabase.from('search_logs') as any).insert({
+          query: searchQuery,
+          found_count: 0,
+          user_id: currentUser?.id ?? null
+        })
+      }
+    }, 2000) // Debounce: Wait for typing to finish and fetch to potentially complete
+
+    return () => clearTimeout(timeout)
+  }, [searchQuery, filteredShops.length, currentUser?.id, supabase])
+
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return
@@ -1277,7 +1330,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
           onShopClick={handleShopClick}
           currentUserId={currentUserId}
           refreshSignal={mapRefreshSignal}
-          activeFilter={activeFilter}
+          filters={filters}
           intentOverrides={intentOverrides}
           onMapReady={onMapReady}
           heatmapMode={layerState.heat ? 'all' : null}
@@ -1291,8 +1344,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onLocationSelect={handleLocationSelect}
-        activeFilter={activeFilter}
-        onFilterChange={setActiveFilter}
         isListOpen={isListOpen}
         onToggleList={() => setIsListOpen((prev) => !prev)}
         currentUser={currentUser}
@@ -1301,6 +1352,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         onOpenActivity={() => setIsActivityOpen(true)}
         heatmapMode={heatmapMode}
         onSetHeatmapMode={setHeatmapMode}
+        onOpenFilters={() => setShowFilters(true)}
       />
       <ActivityFeedDrawer
         userId={currentUser?.id}
@@ -1323,109 +1375,25 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         </div>
       )}
 
+      {/* Area Insights Panel */}
       {isListOpen && (
-        <div
-          className={clsx(
-            "fixed inset-x-0 bottom-0 h-[40vh] w-full rounded-t-2xl border-t border-white/20 bg-white/90 backdrop-blur-md shadow-2xl overflow-y-auto z-20 transition-all duration-300 ease-out",
-            "md:fixed md:left-4 md:top-28 md:bottom-4 md:w-80 md:h-auto md:rounded-xl md:border md:border-white/20"
-          )}
-        >
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-800">Homes in view</p>
-              <p className="text-xs text-slate-500">{visibleShops.length.toLocaleString('en-GB')} homes</p>
-            </div>
-            <button
-              className="text-xs text-slate-500 hover:text-slate-700"
-              onClick={() => setIsListOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-          <div className="p-3 space-y-3">
-            <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-50/50 border border-slate-100 backdrop-blur-sm p-3 mb-1 text-center">
-              <div className="flex flex-col items-center gap-1">
-                <MessageCircle className="h-4 w-4 text-[#007C7C]" />
-                <p className="text-xs font-semibold text-slate-700">Open</p>
-                <p className="text-sm font-bold text-slate-900">
-                  {activeShops.filter((home) => home.is_open_to_talking).length}
-                </p>
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <Flame className="h-4 w-4 text-[#E65F52]" />
-                <p className="text-xs font-semibold text-slate-700">Active</p>
-                <p className="text-sm font-bold text-slate-900">
-                  {activeShops.filter((home) => home.is_for_sale || home.is_for_rent).length}
-                </p>
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <HomeIcon className="h-4 w-4 text-[#F5A623]" />
-                <p className="text-xs font-semibold text-slate-700">Claimed</p>
-                <p className="text-sm font-bold text-slate-900">
-                  {activeShops.filter((home) => home.is_claimed).length}
-                </p>
-              </div>
-            </div>
-
-            {activeShops.length === 0 ? (
-              <div className="text-sm text-slate-500 text-center py-6">
-                No active signals in this view. Be the first to claim!
-              </div>
-            ) : (
-              activeShops.map((home) => {
-                const label = buildDisplayLabel(home)
-                const address = buildAddressLine(home)
-                const isOpen = !!home.is_open_to_talking
-                const isActive = !!home.is_for_sale || !!home.is_for_rent
-                const isClaimed = !!home.is_claimed
-                const containerClasses = clsx(
-                  "w-full text-left mb-3 p-3 rounded-xl border border-transparent transition-all hover:scale-[1.02] hover:shadow-md cursor-pointer bg-white/60 backdrop-blur-md",
-                  isOpen
-                    ? "border-l-4 border-l-teal-500 bg-teal-50/30"
-                    : isActive
-                      ? "border-l-4 border-l-rose-500 bg-red-50/30"
-                      : isClaimed
-                        ? "border-l-4 border-l-slate-500"
-                        : "border-l-4 border-l-gray-200"
-                )
-                const badgeClasses = clsx(
-                  "text-[11px] px-2 py-1 rounded-full font-semibold",
-                  isOpen
-                    ? "bg-[#007C7C]/10 text-[#007C7C]"
-                    : isActive
-                      ? "bg-[#E65F52]/10 text-[#E65F52]"
-                      : isClaimed
-                        ? "bg-slate-100 text-slate-700 border border-slate-200"
-                        : "bg-slate-100 text-slate-600"
-                )
-                const badgeLabel = isOpen
-                  ? "Open"
-                  : isActive
-                    ? home.is_for_sale
-                      ? "For Sale"
-                      : "For Rent"
-                    : isClaimed
-                      ? "Claimed"
-                      : "Unclaimed"
-
-                return (
-                  <button
-                    key={home.id}
-                    onClick={() => handleShopClick(home)}
-                    className={containerClasses}
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <p className="font-semibold text-slate-900 text-sm line-clamp-1">{label}</p>
-                      <span className={badgeClasses}>{badgeLabel}</span>
-                    </div>
-                    <p className="text-xs text-slate-500 line-clamp-1">{address}</p>
-                  </button>
-                )
-              })
-            )}
-          </div>
+        <div className="absolute top-24 left-4 bottom-24 w-80 z-[60] pointer-events-none flex flex-col animate-in slide-in-from-left-4 duration-300">
+          {/* Pointer events auto is handled inside the component */}
+          <AreaInsightsPanel
+            properties={activeShops}
+            onSelectProperty={handleShopClick}
+            currentUser={currentUser}
+          />
         </div>
       )}
+
+      {/* Filter Modal */}
+      <FilterModal
+        isOpen={showFilters}
+        onClose={() => setShowFilters(false)}
+        filters={filters}
+        onFilterChange={setFilters}
+      />
 
       {selectedHome && (
         <div
@@ -1767,6 +1735,17 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
                 {savingStory ? 'Saving...' : 'Update details'}
               </button>
             )}
+
+            <div className="mt-8 text-center">
+              <button
+                onClick={() => {
+                  alert('Thanks for flagging. Our team will review this home.')
+                }}
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+              >
+                Flag this home
+              </button>
+            </div>
           </div>
         </div>
       )}

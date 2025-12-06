@@ -16,7 +16,7 @@ interface LayerToggleProps {
 }
 
 const CRYPTO_INFO = {
-  BTC: { name: 'Bitcoin', color: 'bg-orange-500', emoji: '₿' },
+  BTC: { name: 'Bitcoin', color: 'bg-primary', emoji: '₿' },
   BCH: { name: 'Bitcoin Cash', color: 'bg-green-500', emoji: '💚' },
   LTC: { name: 'Litecoin', color: 'bg-blue-500', emoji: '🔷' },
   XMR: { name: 'Monero', color: 'bg-purple-500', emoji: '🔒' },
@@ -44,7 +44,7 @@ export default function LayerToggle({ layers, onLayerChange }: LayerToggleProps)
           <span className="font-bold text-gray-900">Map Layers</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold px-2 py-1 bg-orange-100 text-orange-700 rounded-full">
+          <span className="text-xs font-semibold px-2 py-1 bg-primary/10 text-primary rounded-full">
             {activeCount} active
           </span>
           <span className={`text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
@@ -74,7 +74,7 @@ export default function LayerToggle({ layers, onLayerChange }: LayerToggleProps)
                   <div className="text-xs text-gray-500">Community submitted</div>
                 </div>
               </div>
-              <div className={`w-3 h-3 rounded-full ${layers.userShops ? 'bg-amber-500' : 'bg-gray-300'}`} />
+              <div className={`w-3 h-3 rounded-full ${layers.userShops ? 'bg-primary' : 'bg-gray-300'}`} />
             </label>
           </div>
 
@@ -94,12 +94,12 @@ export default function LayerToggle({ layers, onLayerChange }: LayerToggleProps)
                     type="checkbox"
                     checked={layers[crypto]}
                     onChange={() => toggleLayer(crypto)}
-                    className="w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                    className="w-5 h-5 rounded border-2 border-gray-300 text-primary focus:ring-2 focus:ring-primary cursor-pointer"
                   />
                   <div className="flex items-center gap-2 flex-1">
                     <span className="text-xl">{info.emoji}</span>
                     <div>
-                      <div className="font-semibold text-gray-900 group-hover:text-orange-600 transition-colors">
+                      <div className="font-semibold text-gray-900 group-hover:text-primary transition-colors">
                         {info.name}
                       </div>
                       <div className="text-xs text-gray-500">{crypto}</div>
@@ -117,11 +117,11 @@ export default function LayerToggle({ layers, onLayerChange }: LayerToggleProps)
               <div className="font-semibold mb-1">Legend:</div>
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                  <div className="w-2 h-2 rounded-full bg-primary" />
                   <span>User-submitted shops</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-orange-500" />
+                  <div className="w-2 h-2 rounded-full bg-primary" />
                   <span>OSM crypto shops</span>
                 </div>
               </div>

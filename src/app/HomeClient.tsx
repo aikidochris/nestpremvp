@@ -213,12 +213,18 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         const url = `/api/properties?${params.toString()}`
         const response = await fetch(url)
 
-        if (response.ok) {
-          const { data } = await response.json()
-          setShops(data || [])
-        } else {
-          console.error('Failed to fetch properties:', response.statusText)
+        const contentType = response.headers.get('content-type')
+        if (!contentType || !contentType.includes('application/json')) {
+          console.error('Received non-JSON response from API:', await response.text())
+          throw new Error('API returned invalid format')
         }
+
+        const json = await response.json()
+        if (!response.ok) {
+          throw new Error(json?.error || response.statusText || 'Failed to fetch properties')
+        }
+
+        setShops(json?.data || [])
       } catch (error) {
         console.error('Error fetching properties:', error)
       }

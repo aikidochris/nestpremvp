@@ -92,6 +92,7 @@ export default function ShopMap({
   const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
   const hasFitBounds = useRef(false)
   const lastFetchKey = useRef<string | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const fetchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressFetchUntil = useRef<number>(0)
 
@@ -255,6 +256,12 @@ export default function ShopMap({
       zoom: zoomValue,
     })
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     const params = new URLSearchParams()
     params.set('north', bounds.getNorth().toString())
     params.set('south', bounds.getSouth().toString())
@@ -270,8 +277,17 @@ export default function ShopMap({
 
     try {
       setIsLoading(true)
-      const res = await fetch(url)
+      const res = await fetch(url, { signal: controller.signal })
       const json = await res.json()
+
+      console.log(
+        '[ShopMap DEBUG] Claimed Status Sample:',
+        (json?.data ?? []).slice(0, 10).map((p: any) => ({
+          id: p?.id,
+          postcode: p?.postcode,
+          claimed: p?.is_claimed,
+        }))
+      )
 
       console.log('[ShopMap] /api/properties response', {
         status: res.status,
@@ -287,15 +303,15 @@ export default function ShopMap({
       setProperties((prev) => {
         const raw = json.data ?? []
         const next = (raw as any[]).map((item) => {
-          const flags = Array.isArray(item.intent_flags) ? item.intent_flags[0] : item.intent_flags
           const signals = {
-            is_for_sale: flags?.is_for_sale ?? false,
-            is_for_rent: flags?.is_for_rent ?? false,
-            soft_listing: flags?.soft_listing ?? false,
+            is_for_sale: item?.is_for_sale ?? false,
+            is_for_rent: item?.is_for_rent ?? false,
+            soft_listing: item?.is_open_to_talking ?? false,
           }
           return {
             ...item,
             signals,
+            is_claimed: item?.is_claimed ?? false,
             is_for_sale: signals.is_for_sale,
             is_for_rent: signals.is_for_rent,
             is_open_to_talking: signals.soft_listing,
@@ -313,10 +329,15 @@ export default function ShopMap({
         hasFitBounds.current = true
       }
     } catch (err) {
+      if ((err as any)?.name === 'AbortError') {
+        return
+      }
       console.error('[ShopMap] network error fetching properties', err)
       // Keep existing properties to avoid unmounting markers on transient errors
     } finally {
-      setIsLoading(false)
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false)
+      }
     }
   }, [buildBoundsKey, filterClaimed, filterForRent, filterForSale, filterOpen, map])
 

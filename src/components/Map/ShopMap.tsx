@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, Marker, Popup, TileLayer, useMap, ZoomControl } from 'react-leaflet'
+import { MapContainer, Marker, Popup, TileLayer, useMap, ZoomControl, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
@@ -12,6 +12,8 @@ import HeatmapOverlay, { type HeatmapPoint } from './HeatmapLayer'
 import type { LayerState } from './LayerToggle'
 import type { FilterState } from '../UI/FilterModal'
 import PoiLayer from './PoiLayer'
+import { Plus, X } from 'lucide-react'
+import { MapContextMenu } from './MapContextMenu'
 
 // Fix for default marker icons in Next.js
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -55,6 +57,11 @@ interface ShopMapProps {
   onMapReady?: (map: L.Map) => void
   heatmapMode?: 'all' | 'market' | 'social' | null
   activeLayers?: LayerState
+  isAdmin?: boolean
+  draggablePropertyId?: string | null
+  onPinDragEnd?: (id: string, lat: number, lon: number) => void
+  isAddingHome?: boolean
+  onSetIsAddingHome?: (v: boolean) => void
 }
 
 const PILOT_BOUNDS: L.LatLngBoundsExpression = [
@@ -69,6 +76,25 @@ function MapInstanceCatcher({ onReady }: { onReady: (map: L.Map) => void }) {
   }, [m, onReady])
   return null
 }
+
+// Click Handler Component
+function MapClickHandler({
+  isAddingHome,
+  onMapClick
+}: {
+  isAddingHome?: boolean
+  onMapClick: (lat: number, lng: number) => void
+}) {
+  useMapEvents({
+    click(e) {
+      if (isAddingHome) {
+        onMapClick(e.latlng.lat, e.latlng.lng)
+      }
+    },
+  })
+  return null
+}
+
 
 const INDIVIDUAL_MARKER_ZOOM = 16
 const CLUSTER_MAX_ZOOM = 15
@@ -106,6 +132,11 @@ export default function ShopMap({
   onMapReady,
   heatmapMode = null,
   activeLayers,
+  isAdmin,
+  draggablePropertyId,
+  onPinDragEnd,
+  isAddingHome,
+  onSetIsAddingHome
 }: ShopMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
 
@@ -130,6 +161,42 @@ export default function ShopMap({
   const fetchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressFetchUntil = useRef<number>(0)
   const supabase = getSupabaseClient()
+
+  // Debug Admin Prop
+  console.log('[ShopMap] Render. isAdmin:', isAdmin)
+
+  // New Admin State
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newPropertyLoc, setNewPropertyLoc] = useState<{ lat: number, lng: number } | null>(null)
+  const [newPropertyData, setNewPropertyData] = useState({ house_number: '', street: '', postcode: '' })
+  const [creating, setCreating] = useState(false)
+
+  const handleCreateProperty = async () => {
+    if (!newPropertyLoc) return
+    setCreating(true)
+    try {
+      const { data, error } = await supabase.rpc('admin_create_property', {
+        lat: newPropertyLoc.lat,
+        lon: newPropertyLoc.lng,
+        address_data: newPropertyData
+      })
+
+      if (error) throw error
+
+      alert('Property created successfully!')
+      setShowCreateModal(false)
+      setNewPropertyData({ house_number: '', street: '', postcode: '' })
+      setNewPropertyLoc(null) // Clear marker
+
+      // Force refresh by invalidating last fetch key
+      lastFetchKey.current = null
+      fetchForBounds()
+    } catch (err: any) {
+      alert('Failed to create property: ' + err.message)
+    } finally {
+      setCreating(false)
+    }
+  }
 
   // Reset fetch key when switching modes so we force a refresh
   useEffect(() => {
@@ -209,9 +276,6 @@ export default function ShopMap({
       })),
     [properties]
   )
-
-  // Debug: Ensure we are passing all 16000+ points to Supercluster, not just active ones
-  // console.log('[ShopMap] Total points for clustering:', geojsonPoints.length)
 
   const clusterIndex = useMemo(() => {
     const index = new Supercluster({
@@ -547,6 +611,7 @@ export default function ShopMap({
     const label = buildDisplayLabel(displayProperty)
     const address = displayProperty.postcode || displayProperty.street || 'No postcode'
     const { icon, zIndexOffset } = getShopIcon(displayProperty)
+    const isDraggable = draggablePropertyId === displayProperty.id
 
     return (
       <Marker
@@ -556,12 +621,18 @@ export default function ShopMap({
         zIndexOffset={zIndexOffset}
         bubblingMouseEvents={false}
         interactive
+        draggable={isDraggable}
         eventHandlers={{
           click: (e) => {
             suppressFetchUntil.current = Date.now() + 300
             e?.originalEvent?.stopPropagation?.()
             onShopClick?.(displayProperty)
           },
+          dragend: (e) => {
+            const marker = e.target
+            const position = marker.getLatLng()
+            onPinDragEnd?.(displayProperty.id, position.lat, position.lng)
+          }
         }}
       >
         <Popup>
@@ -592,6 +663,7 @@ export default function ShopMap({
       const address = displayProperty.postcode || displayProperty.street || 'No postcode'
       const { icon, zIndexOffset } = getShopIcon(displayProperty)
       const position = spiderfyPositions.get(displayProperty.id) ?? [displayProperty.lat, displayProperty.lon]
+      const isDraggable = draggablePropertyId === displayProperty.id
 
       return (
         <Marker
@@ -601,12 +673,18 @@ export default function ShopMap({
           zIndexOffset={zIndexOffset}
           bubblingMouseEvents={false}
           interactive
+          draggable={isDraggable}
           eventHandlers={{
             click: (e) => {
               suppressFetchUntil.current = Date.now() + 300
               e?.originalEvent?.stopPropagation?.()
               onShopClick?.(displayProperty)
             },
+            dragend: (e) => {
+              const marker = e.target
+              const position = marker.getLatLng()
+              onPinDragEnd?.(displayProperty.id, position.lat, position.lng)
+            }
           }}
         >
           <Popup>
@@ -640,7 +718,7 @@ export default function ShopMap({
       <MapContainer
         center={center}
         zoom={zoom}
-        className="w-full h-full"
+        className={`w-full h-full ${isAddingHome ? 'cursor-crosshair' : ''}`}
         scrollWheelZoom={true}
         zoomControl={false}
         style={{ width: '100%', height: '100%' }}
@@ -649,6 +727,15 @@ export default function ShopMap({
         maxBoundsViscosity={0.8}
       >
         <MapInstanceCatcher onReady={setMap} />
+        <MapClickHandler
+          isAddingHome={isAddingHome}
+          onMapClick={(lat, lng) => {
+            console.log('Map Clicked in Add Mode:', lat, lng)
+            setNewPropertyLoc({ lat, lng })
+            setShowCreateModal(true)
+            onSetIsAddingHome?.(false)
+          }}
+        />
         <ZoomControl position="bottomright" />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors & Carto'
@@ -669,9 +756,78 @@ export default function ShopMap({
 
         {/* POI Layer */}
         {poiTypes.length > 0 && <PoiLayer visibleTypes={poiTypes} />}
+
+        {/* Temporary Marker for new property creation */}
+        {newPropertyLoc && showCreateModal && (
+          <Marker position={[newPropertyLoc.lat, newPropertyLoc.lng]} icon={createSolidIcon('#10b981', 24, false)} />
+        )}
+
       </MapContainer>
       {heatmapMode && <HeatmapLegend />}
-      {/* Ensure Legend sits above map but below modals. MapContainer has z=0/auto? Legend has z=[1000] */}
+
+      {/* Context Menu */}
+
+
+      {/* Create Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-slate-800">Add New Home</h3>
+              <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-500 uppercase">House Number</label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition"
+                  placeholder="e.g. 42"
+                  value={newPropertyData.house_number}
+                  onChange={e => setNewPropertyData({ ...newPropertyData, house_number: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-500 uppercase">Street</label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition"
+                  placeholder="e.g. Baker Street"
+                  value={newPropertyData.street}
+                  onChange={e => setNewPropertyData({ ...newPropertyData, street: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-500 uppercase">Postcode</label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition"
+                  placeholder="e.g. NE1 4AD"
+                  value={newPropertyData.postcode}
+                  onChange={e => setNewPropertyData({ ...newPropertyData, postcode: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-slate-50 flex justify-end gap-2">
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateProperty}
+                disabled={creating}
+                className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
+              >
+                {creating ? 'Creating...' : 'Create Property'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import clsx from 'clsx'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState, useCallback, useEffect, useMemo, type ChangeEvent, useRef } from 'react'
-import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame, Share2 } from 'lucide-react'
+import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame, Share2, Edit2, MapPin, Save, X } from 'lucide-react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
 import LayerToggle, { LayerState } from '@/components/Map/LayerToggle'
@@ -21,6 +21,7 @@ import FilterModal, { FilterState } from '@/components/UI/FilterModal'
 import AreaInsightsPanel from '@/components/Map/AreaInsightsPanel'
 
 
+
 interface User {
   id: string
   email?: string
@@ -36,7 +37,8 @@ interface HomeClientProps {
 type OwnerStatus = 'settled' | 'open' | 'sale' | 'rent'
 type MessageMode = 'direct' | 'note' | 'future'
 
-export default function HomeClient({ shops: initialShops, user: _user, isAdmin: _isAdmin, initialFollowedIds = [] }: HomeClientProps) {
+export default function HomeClient({ shops: initialShops, user: _user, isAdmin, initialFollowedIds = [] }: HomeClientProps) {
+  console.log('[HomeClient] isAdmin prop:', isAdmin);
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
@@ -82,6 +84,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const [mapReady, setMapReady] = useState(false)
   const [isListOpen, setIsListOpen] = useState<boolean>(false)
 
+  // Admin God Mode State
+  const [adminEditMode, setAdminEditMode] = useState(false)
+  const [adminEditData, setAdminEditData] = useState<any>(null)
+  const [adminSaving, setAdminSaving] = useState(false)
+
 
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
@@ -108,6 +115,12 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
   const lastPendingUserKeyRef = useRef<string | null>(null)
   const { isFollowed, toggleFollow } = usePropertyFollows()
   const [heatmapMode, setHeatmapMode] = useState<'all' | 'market' | 'social' | null>(null)
+
+
+
+  // Admin State
+  const [isAddingHome, setIsAddingHome] = useState(false)
+
   const [layerState, setLayerState] = useState<LayerState>({
     homes: true,
     heat: false,
@@ -166,7 +179,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
       if (!error) {
         setCurrentUser(data.user ?? null)
         if (data.user) {
-          refreshPendingRequestCount(data.user.id)
+          refreshPendingRequestCount(data.user.id, undefined)
         }
       } else {
         console.error('[Auth] getUser error', error)
@@ -181,7 +194,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         console.log('[Auth] onAuthStateChange', _event, session?.user?.email)
         setCurrentUser(session?.user ?? null)
         if (session?.user) {
-          refreshPendingRequestCount(session.user.id)
+          refreshPendingRequestCount(session.user.id, undefined)
         } else {
           setPendingRequestCount(0)
         }
@@ -294,7 +307,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
       setNewUploads([])
       setImageOrder([])
       setCurrentImageIndex(0)
+      setCurrentImageIndex(0)
       setIsMessageModalOpen(false)
+      setAdminEditMode(false)
+      setAdminEditData(null)
       setMessageBody('')
       setMessageError(null)
       setMessageMode('direct')
@@ -402,10 +418,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         setImageOrder([])
         setStoryError(error.message)
       } else {
-        setHomeStory(data ?? null)
-        setStorySummary(data?.summary_text ?? '')
-        setStoryImages(data?.images ?? [])
-        setImageOrder(data?.images ?? [])
+        const storyData = data as any
+        setHomeStory(storyData ?? null)
+        setStorySummary(storyData?.summary_text ?? '')
+        setStoryImages((storyData?.images as string[]) ?? [])
+        setImageOrder((storyData?.images as string[]) ?? [])
         setStoryForId(currentRequestId)
         setCurrentImageIndex(0)
         setNewUploads([])
@@ -458,9 +475,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         setSoftListingError('Could not load conversation preference.')
         setIsOpenToTalking(false)
       } else {
-        const nextSoft = !!data?.soft_listing
-        const nextSale = !!data?.is_for_sale
-        const nextRent = !!data?.is_for_rent
+        const intentData = data as any
+        const nextSoft = !!intentData?.soft_listing
+        const nextSale = !!intentData?.is_for_sale
+        const nextRent = !!intentData?.is_for_rent
         setIsOpenToTalking(nextSoft)
         setLocalForSale(nextSale)
         setLocalForRent(nextRent)
@@ -608,11 +626,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
 
     const { error } = await supabase
       .from('property_claims')
-      .insert({
+      .insert([{
         property_id: selectedHome.id,
         user_id: currentUser.id,
         status: 'claimed',
-      })
+      }] as any)
 
     setClaiming(false)
 
@@ -972,7 +990,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
             property_id: selectedHome.id,
             summary_text: storySummary || null,
             images: finalImages.length ? finalImages : null,
-          },
+          } as any,
           { onConflict: 'property_id' } // respect unique constraint for one story per property
         )
         .select('*')
@@ -984,8 +1002,9 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
       }
 
       setHomeStory(data)
-      setStoryImages(data?.images ?? finalImages)
-      setImageOrder(data?.images ?? finalImages)
+      const storyData = data as any
+      setStoryImages(storyData?.images ?? finalImages)
+      setImageOrder(storyData?.images ?? finalImages)
       setNewUploads([])
       setCurrentImageIndex(0)
       setEditingStory(false)
@@ -1320,9 +1339,21 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
       pendingDeepLinkRef.current = null
     }
   }, [mapReady])
+  console.log('[HomeClient] isAdmin:', isAdmin)
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-white">
+      {isAddingHome && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[5000] flex items-center gap-4 bg-red-600 text-white px-6 py-3 rounded-full shadow-xl animate-in fade-in slide-in-from-top-4">
+          <span className="font-semibold">📍 Click location to add home</span>
+          <button
+            onClick={() => setIsAddingHome(false)}
+            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full text-sm font-medium transition"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       <div className="absolute inset-0 z-0 h-screen">
         <ShopMap
           center={mapCenter}
@@ -1335,8 +1366,19 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
           onMapReady={onMapReady}
           heatmapMode={layerState.heat ? 'all' : null}
           activeLayers={layerState}
+          isAdmin={isAdmin}
+          isAddingHome={isAddingHome}
+          onSetIsAddingHome={setIsAddingHome}
+          draggablePropertyId={adminEditMode && selectedHome ? selectedHome.id : null}
+          onPinDragEnd={(id, lat, lon) => {
+            if (adminEditMode && selectedHome && id === selectedHome.id) {
+              setAdminEditData((prev: any) => ({ ...prev, lat, lon }))
+            }
+          }}
         />
       </div>
+
+
 
       <LayerToggle layers={layerState} onLayerChange={setLayerState} />
 
@@ -1353,39 +1395,49 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         heatmapMode={heatmapMode}
         onSetHeatmapMode={setHeatmapMode}
         onOpenFilters={() => setShowFilters(true)}
+        isAdmin={isAdmin}
+        onAddHomeClick={() => setIsAddingHome(true)}
       />
       <ActivityFeedDrawer
         userId={currentUser?.id}
         isOpen={isActivityOpen}
         onClose={() => setIsActivityOpen(false)}
       />
+
       <div className="z-40">
         <MapLegend />
       </div>
 
-      {!isListOpen && (
-        <div className="absolute left-4 top-24 z-30 hidden md:flex">
-          <button
-            type="button"
-            onClick={() => setIsListOpen(true)}
-            className="inline-flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md border border-white/30 px-4 py-2 text-sm font-semibold text-slate-800 shadow-lg hover:bg-white transition"
-          >
-            {activeShops.length.toLocaleString('en-GB')} Active Homes
-          </button>
-        </div>
-      )}
+
+
+      {
+        !isListOpen && (
+          <div className="absolute left-4 top-24 z-30 hidden md:flex">
+            <button
+              type="button"
+              onClick={() => setIsListOpen(true)}
+              className="inline-flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md border border-white/30 px-4 py-2 text-sm font-semibold text-slate-800 shadow-lg hover:bg-white transition"
+            >
+              {activeShops.length.toLocaleString('en-GB')} Active Homes
+            </button>
+          </div>
+        )
+      }
 
       {/* Area Insights Panel */}
-      {isListOpen && (
-        <div className="absolute top-24 left-4 bottom-24 w-80 z-[60] pointer-events-none flex flex-col animate-in slide-in-from-left-4 duration-300">
-          {/* Pointer events auto is handled inside the component */}
-          <AreaInsightsPanel
-            properties={activeShops}
-            onSelectProperty={handleShopClick}
-            currentUser={currentUser}
-          />
-        </div>
-      )}
+      {
+        isListOpen && (
+          <div className="absolute top-24 left-4 bottom-24 w-80 z-[60] pointer-events-none flex flex-col animate-in slide-in-from-left-4 duration-300">
+            {/* Pointer events auto is handled inside the component */}
+            <AreaInsightsPanel
+              properties={activeShops}
+              onSelectProperty={handleShopClick}
+              currentUser={currentUser}
+            />
+          </div>
+        )
+      }
+
 
       {/* Filter Modal */}
       <FilterModal
@@ -1395,360 +1447,502 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         onFilterChange={setFilters}
       />
 
-      {selectedHome && (
-        <div
-          className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/95 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[60] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
-        >
-          {/* Hero */}
-          <div className="relative h-64 w-full bg-slate-100 group">
-            <div className="absolute top-3 right-3 z-20 flex items-center gap-3">
-              <FollowButton
-                propertyId={selectedHome.id}
-                initialIsFollowed={followedIds.includes(selectedHome.id)}
-                onToggleSuccess={(isNowFollowed) => {
-                  setFollowedIds((prev) => {
-                    if (isNowFollowed) {
-                      if (prev.includes(selectedHome.id)) return prev
-                      return [...prev, selectedHome.id]
-                    }
-                    return prev.filter((id) => id !== selectedHome.id)
-                  })
-                }}
-              />
-              <button
-                onClick={() => setSelectedHome(null)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
-                aria-label="Close"
-              >
-                &times;
-              </button>
-            </div>
-            {storyLoading && !storyMatchesSelection ? (
-              <div className="h-full w-full bg-slate-200 animate-pulse" />
-            ) : displayImages.length === 0 ? (
-              <button
-                type="button"
-                className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-500 transition"
-                onClick={() => {
-                  if (!isClaimedByYou) return
-                  fileInputRef.current?.click()
-                }}
-                disabled={!isClaimedByYou}
-              >
-                <Camera className="h-10 w-10" />
-                <span className="text-sm font-medium">Add photos of your home</span>
-              </button>
-            ) : (
-              <div className="relative h-full w-full overflow-hidden">
-                <img
-                  src={displayImages[currentImageIndex]}
-                  alt="Home"
-                  className="h-full w-full object-cover"
+      {
+        selectedHome && (
+          <div
+            className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/95 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[60] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
+          >
+            {/* Hero */}
+            <div className="relative h-64 w-full bg-slate-100 group">
+              <div className="absolute top-3 right-3 z-20 flex items-center gap-3">
+                <FollowButton
+                  propertyId={selectedHome.id}
+                  initialIsFollowed={followedIds.includes(selectedHome.id)}
+                  onToggleSuccess={(isNowFollowed) => {
+                    setFollowedIds((prev) => {
+                      if (isNowFollowed) {
+                        if (prev.includes(selectedHome.id)) return prev
+                        return [...prev, selectedHome.id]
+                      }
+                      return prev.filter((id) => id !== selectedHome.id)
+                    })
+                  }}
                 />
-
-                {displayImages.length > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
-                      onClick={() => setCurrentImageIndex((idx) => (idx === 0 ? displayImages.length - 1 : idx - 1))}
-                      aria-label="Previous photo"
-                    >
-                      <ChevronLeft className="h-5 w-5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
-                      onClick={() => setCurrentImageIndex((idx) => (idx === displayImages.length - 1 ? 0 : idx + 1))}
-                      aria-label="Next photo"
-                    >
-                      <ChevronRight className="h-5 w-5" />
-                    </button>
-                    <span className="absolute bottom-3 right-3 rounded-full bg-black/60 px-3 py-1 text-xs font-semibold text-white">
-                      {currentImageIndex + 1} / {displayImages.length}
-                    </span>
-                  </>
-                )}
-
-                {isClaimedByYou && (
-                  <>
-                    <button
-                      type="button"
-                      className="absolute top-3 right-12 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
-                      onClick={() => fileInputRef.current?.click()}
-                      aria-label="Add photo"
-                    >
-                      <Plus className="h-5 w-5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="absolute top-3 left-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-red-600 shadow hover:bg-white"
-                      onClick={handleDeleteImage}
-                      aria-label="Delete photo"
-                      disabled={!displayImages.length}
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-white"
-                      onClick={handleMakeMain}
-                      disabled={!displayImages.length}
-                    >
-                      {currentImageIndex === 0 ? (
-                        <span className="inline-flex items-center gap-1 text-[#007C7C]">
-                          <Star className="h-4 w-4 fill-[#007C7C] text-[#007C7C]" />
-                          Main Photo
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1">
-                          <StarOff className="h-4 w-4" />
-                          Make Main
-                        </span>
-                      )}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*"
-              className="hidden"
-              onChange={handleStoryFileChange}
-            />
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5 space-y-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-                  {selectedHomeTitle}
-                </h2>
-                {isClaimedByYou && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-50 text-teal-700">
-                    Verified Owner
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-gray-700 mt-1">
-                {selectedHomeAddress}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {isCheckingClaim ? (
-                <div className="h-5 w-32 bg-slate-200 rounded animate-pulse"></div>
-              ) : (
-                <>
-                  {statusBadge && (
-                    <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${statusBadge.classes}`}>
-                      {statusBadge.label}
-                    </span>
-                  )}
-                  {claimRecord && claimRecord.property_id === selectedHome.id && isClaimedByYou && (
-                    <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700">
-                      Claimed by you
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-
-            {canMessageOwner && (
-              <button
-                type="button"
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:border-slate-300"
-                onClick={handleOpenMessageModal}
-              >
-                <MessageCircle className="h-4 w-4" />
-                {messageButtonLabel}
-              </button>
-            )}
-
-            {isClaimedByYou && pendingRequestCount > 0 && (
-              <div className="rounded-xl border border-teal-100 bg-teal-50 p-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-[#007C7C]">
-                    <Bell className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-[#007C7C]">
-                      {pendingRequestCount} {pendingRequestCount === 1 ? 'person has' : 'people have'} left notes for you.
-                    </p>
-                    <p className="text-xs text-[#007C7C]">Open them when you are ready to reply.</p>
-                  </div>
-                </div>
                 <button
-                  type="button"
-                  className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#007C7C] shadow-sm hover:bg-teal-100"
-                  onClick={handleViewPendingNotes}
+                  onClick={() => setSelectedHome(null)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
+                  aria-label="Close"
                 >
-                  View
+                  &times;
                 </button>
               </div>
-            )}
+              {/* Admin Edit Controls Header */}
+              {isAdmin && selectedHome && (
+                <div className="absolute top-3 left-3 z-20">
+                  <button
+                    onClick={() => {
+                      if (adminEditMode) {
+                        setAdminEditMode(false)
+                        setAdminEditData(null)
+                      } else {
+                        setAdminEditMode(true)
+                        setAdminEditData({
+                          house_number: selectedHome.house_number,
+                          street: selectedHome.street,
+                          postcode: selectedHome.postcode,
+                          price_estimate: selectedHome.price_estimate,
+                          lat: selectedHome.lat,
+                          lon: selectedHome.lon
+                        })
+                      }
+                    }}
+                    className="inline-flex h-9 px-3 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow hover:bg-white font-semibold text-xs gap-1"
+                  >
+                    {adminEditMode ? <><X size={14} /> Cancel Edit</> : <><Edit2 size={14} /> Admin Edit</>}
+                  </button>
+                </div>
+              )}
 
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-slate-900">What are your plans?</h4>
-              {renderOwnershipControls()}
+              {storyLoading && !storyMatchesSelection ? (
+                <div className="h-full w-full bg-slate-200 animate-pulse" />
+              ) : displayImages.length === 0 ? (
+                <button
+                  type="button"
+                  className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-500 transition"
+                  onClick={() => {
+                    if (!isClaimedByYou) return
+                    fileInputRef.current?.click()
+                  }}
+                  disabled={!isClaimedByYou}
+                >
+                  <Camera className="h-10 w-10" />
+                  <span className="text-sm font-medium">Add photos of your home</span>
+                </button>
+              ) : (
+                <div className="relative h-full w-full overflow-hidden">
+                  <img
+                    src={displayImages[currentImageIndex]}
+                    alt="Home"
+                    className="h-full w-full object-cover"
+                  />
+
+                  {displayImages.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
+                        onClick={() => setCurrentImageIndex((idx) => (idx === 0 ? displayImages.length - 1 : idx - 1))}
+                        aria-label="Previous photo"
+                      >
+                        <ChevronLeft className="h-5 w-5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
+                        onClick={() => setCurrentImageIndex((idx) => (idx === displayImages.length - 1 ? 0 : idx + 1))}
+                        aria-label="Next photo"
+                      >
+                        <ChevronRight className="h-5 w-5" />
+                      </button>
+                      <span className="absolute bottom-3 right-3 rounded-full bg-black/60 px-3 py-1 text-xs font-semibold text-white">
+                        {currentImageIndex + 1} / {displayImages.length}
+                      </span>
+                    </>
+                  )}
+
+                  {isClaimedByYou && (
+                    <>
+                      <button
+                        type="button"
+                        className="absolute top-3 right-12 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
+                        onClick={() => fileInputRef.current?.click()}
+                        aria-label="Add photo"
+                      >
+                        <Plus className="h-5 w-5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute top-3 left-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-red-600 shadow hover:bg-white"
+                        onClick={handleDeleteImage}
+                        aria-label="Delete photo"
+                        disabled={!displayImages.length}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-white"
+                        onClick={handleMakeMain}
+                        disabled={!displayImages.length}
+                      >
+                        {currentImageIndex === 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[#007C7C]">
+                            <Star className="h-4 w-4 fill-[#007C7C] text-[#007C7C]" />
+                            Main Photo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1">
+                            <StarOff className="h-4 w-4" />
+                            Make Main
+                          </span>
+                        )}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*"
+                className="hidden"
+                onChange={handleStoryFileChange}
+              />
             </div>
 
-            {claimError && (
-              <div className="text-sm text-red-600">
-                {claimError}
-              </div>
-            )}
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-5 space-y-4">
 
-            {!propertyIsClaimed && (
-              <p className="text-xs text-gray-500">
-                Claim this home to mark it as open to conversations.
-              </p>
-            )}
 
-            <div className="pt-2 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-base font-semibold text-gray-900">About this home</h3>
-                {homeStory && isClaimedByYou && !editingStory && (
-                  <button
-                    className="text-sm text-amber-700 hover:text-amber-800 font-semibold"
-                    onClick={() => setEditingStory(true)}
-                  >
-                    Edit
-                  </button>
+              {/* Admin Edit Form */}
+              {adminEditMode && adminEditData ? (
+                <div className="p-4 bg-slate-50 border-b border-slate-200 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase">House Number</label>
+                    <input
+                      className="w-full p-2 border rounded text-sm"
+                      value={adminEditData.house_number || ''}
+                      onChange={e => setAdminEditData({ ...adminEditData, house_number: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase">Street</label>
+                    <input
+                      className="w-full p-2 border rounded text-sm"
+                      value={adminEditData.street || ''}
+                      onChange={e => setAdminEditData({ ...adminEditData, street: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase">Postcode</label>
+                    <input
+                      className="w-full p-2 border rounded text-sm"
+                      value={adminEditData.postcode || ''}
+                      onChange={e => setAdminEditData({ ...adminEditData, postcode: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase">Price Estimate</label>
+                    <input
+                      className="w-full p-2 border rounded text-sm"
+                      value={adminEditData.price_estimate || ''}
+                      onChange={e => setAdminEditData({ ...adminEditData, price_estimate: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="p-3 bg-blue-50 text-blue-800 text-xs rounded border border-blue-100 flex items-center gap-2">
+                    <MapPin size={16} />
+                    <div>Drag the pin on the map to allow moving.</div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      className="flex-1 py-2 bg-emerald-600 text-white rounded font-semibold text-sm hover:bg-emerald-700 flex items-center justify-center gap-2"
+                      onClick={async () => {
+                        setAdminSaving(true)
+                        try {
+                          // Update details
+                          const { error: updateError } = await supabase.rpc('admin_update_property', {
+                            property_id: selectedHome.id,
+                            update_data: {
+                              house_number: adminEditData.house_number,
+                              street: adminEditData.street,
+                              postcode: adminEditData.postcode,
+                              price_estimate: adminEditData.price_estimate
+                            }
+                          } as any)
+                          if (updateError) throw updateError
+
+                          // Update location if changed
+                          if (adminEditData.lat !== selectedHome.lat || adminEditData.lon !== selectedHome.lon) {
+                            const { error: moveError } = await supabase.rpc('admin_move_pin', {
+                              target_property_id: selectedHome.id,
+                              new_lat: adminEditData.lat,
+                              new_lon: adminEditData.lon
+                            } as any)
+                            if (moveError) throw moveError
+                          }
+
+                          alert('Saved successfully')
+                          setAdminEditMode(false)
+                          // Force map refresh logic here if possible, or reload page
+                          window.location.reload()
+                        } catch (e: any) {
+                          alert('Error saving: ' + e.message)
+                        } finally {
+                          setAdminSaving(false)
+                        }
+                      }}
+                      disabled={adminSaving}
+                    >
+                      <Save size={16} /> {adminSaving ? 'Saving...' : 'Save Changes'}
+                    </button>
+                    <button
+                      className="px-3 py-2 bg-red-100 text-red-700 rounded font-semibold text-sm hover:bg-red-200"
+                      onClick={async () => {
+                        if (confirm('Are you sure you want to DELETE this property? This cannot be undone.')) {
+                          setAdminSaving(true)
+                          try {
+                            const { error } = await supabase.rpc('admin_delete_property', {
+                              target_property_id: selectedHome.id
+                            } as any)
+                            if (error) throw error
+                            alert('Property deleted.')
+                            setSelectedHome(null)
+                            window.location.reload()
+                          } catch (e: any) {
+                            alert('Error deleting: ' + e.message)
+                          } finally {
+                            setAdminSaving(false)
+                          }
+                        }
+                      }}
+                      disabled={adminSaving}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+                      {selectedHomeTitle}
+                    </h2>
+                    {isClaimedByYou && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-50 text-teal-700">
+                        Verified Owner
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-700 mt-1">
+                    {selectedHomeAddress}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                {isCheckingClaim ? (
+                  <div className="h-5 w-32 bg-slate-200 rounded animate-pulse"></div>
+                ) : (
+                  <>
+                    {statusBadge && (
+                      <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${statusBadge.classes}`}>
+                        {statusBadge.label}
+                      </span>
+                    )}
+                    {claimRecord && claimRecord.property_id === selectedHome.id && isClaimedByYou && (
+                      <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700">
+                        Claimed by you
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
 
-              {storyLoading || !storyMatchesSelection ? (
-                <div className="space-y-2">
-                  <div className="h-4 w-32 bg-slate-200 rounded animate-pulse"></div>
-                  <div className="h-16 w-full bg-slate-200 rounded animate-pulse"></div>
-                </div>
-              ) : (
-                <>
-                  {storyError && (
-                    <div className="mb-3 text-sm text-red-600">
-                      {storyError}
-                    </div>
-                  )}
-
-                  {isClaimedByYou ? (
-                    <>
-                      {(!homeStory || editingStory) ? (
-                        <div className="space-y-3">
-                          <div>
-                            <textarea
-                              value={storySummary}
-                              onChange={(e) => setStorySummary(e.target.value)}
-                              rows={4}
-                              className="w-full min-h-[120px] bg-slate-50 border-0 rounded-xl p-4 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                              placeholder="Tell neighbors what you love about living here..."
-                            />
-                          </div>
-
-                          {homeStory && (
-                            <div className="flex justify-end">
-                              <button
-                                className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                                onClick={() => {
-                                  setEditingStory(false)
-                                  setStorySummary(homeStory?.summary_text ?? '')
-                                  setStoryImages(homeStory?.images ?? [])
-                                  setImageOrder(homeStory?.images ?? [])
-                                  setNewUploads([])
-                                  setCurrentImageIndex(0)
-                                  setStoryError(null)
-                                }}
-                                type="button"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {homeStory?.summary_text ? (
-                            <p className="text-sm text-gray-800 whitespace-pre-line">
-                              {homeStory.summary_text}
-                            </p>
-                          ) : (
-                            <p className="text-sm text-gray-500">No story added yet.</p>
-                          )}
-                          {homeStory?.images?.length ? (
-                            <div className="grid grid-cols-3 gap-2">
-                              {homeStory.images.map((url: string) => (
-                                <img
-                                  key={url}
-                                  src={url}
-                                  alt="Home story"
-                                  className="h-16 w-full object-cover rounded-md border"
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {homeStory ? (
-                        <div className="space-y-2">
-                          {homeStory.summary_text ? (
-                            <p className="text-sm text-gray-800 whitespace-pre-line">
-                              {homeStory.summary_text}
-                            </p>
-                          ) : (
-                            <p className="text-sm text-gray-500">No story text provided.</p>
-                          )}
-                          {homeStory.images?.length ? (
-                            <div className="grid grid-cols-3 gap-2">
-                              {homeStory.images.map((url: string) => (
-                                <img
-                                  key={url}
-                                  src={url}
-                                  alt="Home story"
-                                  className="h-16 w-full object-cover rounded-md border"
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-gray-500">No home story yet.</p>
-                      )}
-                    </>
-                  )}
-                </>
+              {canMessageOwner && (
+                <button
+                  type="button"
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:border-slate-300"
+                  onClick={handleOpenMessageModal}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  {messageButtonLabel}
+                </button>
               )}
-            </div>
 
-            {isClaimedByYou && (editingStory || !homeStory) && (
-              <button
-                className="mt-4 w-full py-3.5 rounded-full font-semibold text-white bg-[#007C7C] shadow-lg transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
-                onClick={handleSaveStory}
-                disabled={savingStory}
-              >
-                {savingStory ? 'Saving...' : 'Update details'}
-              </button>
-            )}
+              {isClaimedByYou && pendingRequestCount > 0 && (
+                <div className="rounded-xl border border-teal-100 bg-teal-50 p-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-[#007C7C]">
+                      <Bell className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-[#007C7C]">
+                        {pendingRequestCount} {pendingRequestCount === 1 ? 'person has' : 'people have'} left notes for you.
+                      </p>
+                      <p className="text-xs text-[#007C7C]">Open them when you are ready to reply.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#007C7C] shadow-sm hover:bg-teal-100"
+                    onClick={handleViewPendingNotes}
+                  >
+                    View
+                  </button>
+                </div>
+              )}
 
-            <div className="mt-8 text-center">
-              <button
-                onClick={() => {
-                  alert('Thanks for flagging. Our team will review this home.')
-                }}
-                className="text-xs text-slate-400 hover:text-slate-600 underline"
-              >
-                Flag this home
-              </button>
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-slate-900">What are your plans?</h4>
+                {renderOwnershipControls()}
+              </div>
+
+              {claimError && (
+                <div className="text-sm text-red-600">
+                  {claimError}
+                </div>
+              )}
+
+              {!propertyIsClaimed && (
+                <p className="text-xs text-gray-500">
+                  Claim this home to mark it as open to conversations.
+                </p>
+              )}
+
+              <div className="pt-2 border-t border-gray-200">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-base font-semibold text-gray-900">About this home</h3>
+                  {homeStory && isClaimedByYou && !editingStory && (
+                    <button
+                      className="text-sm text-amber-700 hover:text-amber-800 font-semibold"
+                      onClick={() => setEditingStory(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+
+                {storyLoading || !storyMatchesSelection ? (
+                  <div className="space-y-2">
+                    <div className="h-4 w-32 bg-slate-200 rounded animate-pulse"></div>
+                    <div className="h-16 w-full bg-slate-200 rounded animate-pulse"></div>
+                  </div>
+                ) : (
+                  <>
+                    {storyError && (
+                      <div className="mb-3 text-sm text-red-600">
+                        {storyError}
+                      </div>
+                    )}
+
+                    {isClaimedByYou ? (
+                      <>
+                        {(!homeStory || editingStory) ? (
+                          <div className="space-y-3">
+                            <div>
+                              <textarea
+                                value={storySummary}
+                                onChange={(e) => setStorySummary(e.target.value)}
+                                rows={4}
+                                className="w-full min-h-[120px] bg-slate-50 border-0 rounded-xl p-4 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                placeholder="Tell neighbors what you love about living here..."
+                              />
+                            </div>
+
+                            {homeStory && (
+                              <div className="flex justify-end">
+                                <button
+                                  className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                                  onClick={() => {
+                                    setEditingStory(false)
+                                    setStorySummary(homeStory?.summary_text ?? '')
+                                    setStoryImages(homeStory?.images ?? [])
+                                    setImageOrder(homeStory?.images ?? [])
+                                    setNewUploads([])
+                                    setCurrentImageIndex(0)
+                                    setStoryError(null)
+                                  }}
+                                  type="button"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {homeStory?.summary_text ? (
+                              <p className="text-sm text-gray-800 whitespace-pre-line">
+                                {homeStory.summary_text}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-gray-500">No story added yet.</p>
+                            )}
+                            {homeStory?.images?.length ? (
+                              <div className="grid grid-cols-3 gap-2">
+                                {homeStory.images.map((url: string) => (
+                                  <img
+                                    key={url}
+                                    src={url}
+                                    alt="Home story"
+                                    className="h-16 w-full object-cover rounded-md border"
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {homeStory ? (
+                          <div className="space-y-2">
+                            {homeStory.summary_text ? (
+                              <p className="text-sm text-gray-800 whitespace-pre-line">
+                                {homeStory.summary_text}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-gray-500">No story text provided.</p>
+                            )}
+                            {homeStory.images?.length ? (
+                              <div className="grid grid-cols-3 gap-2">
+                                {homeStory.images.map((url: string) => (
+                                  <img
+                                    key={url}
+                                    src={url}
+                                    alt="Home story"
+                                    className="h-16 w-full object-cover rounded-md border"
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">No home story yet.</p>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {isClaimedByYou && (editingStory || !homeStory) && (
+                <button
+                  className="mt-4 w-full py-3.5 rounded-full font-semibold text-white bg-[#007C7C] shadow-lg transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+                  onClick={handleSaveStory}
+                  disabled={savingStory}
+                >
+                  {savingStory ? 'Saving...' : 'Update details'}
+                </button>
+              )}
+
+              <div className="mt-8 text-center">
+                <button
+                  onClick={() => {
+                    alert('Thanks for flagging. Our team will review this home.')
+                  }}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  Flag this home
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       <InboxModal
         open={isInboxOpen}
@@ -1765,75 +1959,79 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin: 
         onMarkRead={(propertyId, partnerId) => markThreadRead(propertyId, partnerId)}
       />
 
-      {messageSuccess && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] rounded-full bg-[#007C7C] text-white px-4 py-2 shadow-lg">
-          {messageSuccess}
-        </div>
-      )}
+      {
+        messageSuccess && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] rounded-full bg-[#007C7C] text-white px-4 py-2 shadow-lg">
+            {messageSuccess}
+          </div>
+        )
+      }
 
-      {isMessageModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-200 p-4">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">{messageHeader}</h3>
-                {messageSubtext && (
-                  <p className="mt-1 text-xs text-slate-500">{messageSubtext}</p>
+      {
+        isMessageModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
+            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between border-b border-slate-200 p-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">{messageHeader}</h3>
+                  {messageSubtext && (
+                    <p className="mt-1 text-xs text-slate-500">{messageSubtext}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  onClick={() => setIsMessageModalOpen(false)}
+                  aria-label="Close message modal"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                <textarea
+                  className="w-full rounded-xl border border-slate-200 p-3 text-sm text-slate-800 focus:border-[#007C7C] focus:outline-none focus:ring-2 focus:ring-[#007C7C]/20"
+                  rows={4}
+                  placeholder={
+                    messageMode === 'direct'
+                      ? 'Write a message to the owner...'
+                      : messageMode === 'future'
+                        ? 'Leave a note for the future owner...'
+                        : 'Tell the owner you are interested...'
+                  }
+                  value={messageBody}
+                  onChange={(e) => setMessageBody(e.target.value)}
+                />
+                {messageError && (
+                  <p className="text-xs text-red-600">{messageError}</p>
                 )}
               </div>
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200"
-                onClick={() => setIsMessageModalOpen(false)}
-                aria-label="Close message modal"
-              >
-                &times;
-              </button>
-            </div>
 
-            <div className="p-4 space-y-3">
-              <textarea
-                className="w-full rounded-xl border border-slate-200 p-3 text-sm text-slate-800 focus:border-[#007C7C] focus:outline-none focus:ring-2 focus:ring-[#007C7C]/20"
-                rows={4}
-                placeholder={
-                  messageMode === 'direct'
-                    ? 'Write a message to the owner...'
-                    : messageMode === 'future'
-                      ? 'Leave a note for the future owner...'
-                      : 'Tell the owner you are interested...'
-                }
-                value={messageBody}
-                onChange={(e) => setMessageBody(e.target.value)}
-              />
-              {messageError && (
-                <p className="text-xs text-red-600">{messageError}</p>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-slate-200 p-4">
-              <button
-                type="button"
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                onClick={() => setIsMessageModalOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-[#007C7C] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#006868] disabled:opacity-60"
-                onClick={handleSendMessage}
-                disabled={messageSending || !messageBody.trim()}
-              >
-                {messageSending
-                  ? 'Sending...'
-                  : messageMode === 'direct'
-                    ? 'Send message'
-                    : 'Send note'}
-              </button>
+              <div className="flex justify-end gap-2 border-t border-slate-200 p-4">
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => setIsMessageModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[#007C7C] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#006868] disabled:opacity-60"
+                  onClick={handleSendMessage}
+                  disabled={messageSending || !messageBody.trim()}
+                >
+                  {messageSending
+                    ? 'Sending...'
+                    : messageMode === 'direct'
+                      ? 'Send message'
+                      : 'Send note'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
     </div>
   )
 }

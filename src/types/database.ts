@@ -11,27 +11,27 @@ export interface Database {
     Tables: {
       profiles: {
         Row: {
-          id: string
+          user_id: string
           email: string | null
-          is_admin: boolean
+          role: string
           display_name: string | null
           avatar_url: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
-          id: string
+          user_id: string
           email?: string | null
-          is_admin?: boolean
+          role?: string
           display_name?: string | null
           avatar_url?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
-          id?: string
+          user_id?: string
           email?: string | null
-          is_admin?: boolean
+          role?: string
           display_name?: string | null
           avatar_url?: string | null
           created_at?: string

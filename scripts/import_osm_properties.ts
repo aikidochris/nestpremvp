@@ -23,7 +23,7 @@ type OverpassWay = {
   tags?: Record<string, string>
 }
 
-type OverpassElement = OverpassNode | OverpassWay | { type: string; id: number; [key: string]: any }
+type OverpassElement = OverpassNode | OverpassWay | { type: string; id: number;[key: string]: any }
 
 type PropertyInsert = {
   osm_id: number | null
@@ -40,10 +40,10 @@ type PropertyInsert = {
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
 const BBOX = {
-  minLat: 54.9,
-  maxLat: 55.05,
-  minLon: -1.75,
-  maxLon: -1.5,
+  minLat: 54.96,
+  maxLat: 55.08,
+  minLon: -1.60,
+  maxLon: -1.40,
 }
 
 const QUERY = `

@@ -34,9 +34,6 @@ export async function GET(req: Request) {
       !Number.isNaN(east) &&
       !Number.isNaN(west)
 
-    const LAUNCH_POSTCODES = ['NE25', 'NE26', 'NE27', 'NE29', 'NE30']
-    console.log('[API] Launch Mode: Active (Limit: 15k, Area: North Tyneside)')
-
     console.log('[API /properties] params', {
       north,
       south,
@@ -49,11 +46,12 @@ export async function GET(req: Request) {
       hasBounds,
     })
 
+    // FIX: Changed from 'properties_public_view' to 'property_public_view'
     let query = supabase
-      .from('properties_public_view')
+      .from('property_public_view')
       .select(
         `
-        id,
+        id:property_id,  
         lat,
         lon,
         postcode,
@@ -65,6 +63,7 @@ export async function GET(req: Request) {
         is_for_rent
       `
       )
+    // Note: We map 'property_id' back to 'id' so the frontend doesn't break
 
     // Data Fence: North Tyneside Coast Launch
     query = query.or('postcode.ilike.NE25%,postcode.ilike.NE26%,postcode.ilike.NE27%,postcode.ilike.NE29%,postcode.ilike.NE30%')
@@ -73,7 +72,6 @@ export async function GET(req: Request) {
       query = query.gte('lat', south).lte('lat', north).gte('lon', west).lte('lon', east)
     }
 
-    // Filters
     // Filters (OR logic for discovery)
     const orConditions: string[] = []
 
@@ -85,35 +83,24 @@ export async function GET(req: Request) {
     if (orConditions.length > 0) {
       query = query.or(orConditions.join(','))
     } else if (filterClaimed === 'unclaimed') {
-      // Explicit negative filter if requested alone (legacy support)
+      // Explicit negative filter if requested alone
       query = query.eq('is_claimed', false)
     }
 
     query = query
       .order('is_open_to_talking', { ascending: false })
       .order('is_claimed', { ascending: false })
-      .order('id', { ascending: true })
+      .order('property_id', { ascending: true }) // Use property_id for sorting
       .limit(LIMIT)
 
     const { data, error } = await query
 
     if (error) {
-      console.error('[API /properties] Supabase error', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-      })
-      console.error(error.message, error.details)
+      console.error('[API /properties] Supabase error', error)
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
     const truncated = Array.isArray(data) && data.length === LIMIT
-
-    console.log('[API /properties] result', {
-      count: data?.length ?? 0,
-      truncated,
-    })
 
     return NextResponse.json(
       {

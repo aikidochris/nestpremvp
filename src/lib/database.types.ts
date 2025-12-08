@@ -169,6 +169,92 @@ export type Database = {
           website?: string | null
         }
       }
+      intent_flags: {
+        Row: {
+          created_at: string
+          property_id: string
+          owner_id: string
+          soft_listing: boolean | null
+          is_for_sale: boolean | null
+          is_for_rent: boolean | null
+          claimed_by_user_id: string | null
+          is_claimed: boolean | null
+        }
+        Insert: {
+          created_at?: string
+          property_id: string
+          owner_id: string
+          soft_listing?: boolean | null
+          is_for_sale?: boolean | null
+          is_for_rent?: boolean | null
+          claimed_by_user_id?: string | null
+          is_claimed?: boolean | null
+        }
+        Update: {
+          created_at?: string
+          property_id?: string
+          owner_id?: string
+          soft_listing?: boolean | null
+          is_for_sale?: boolean | null
+          is_for_rent?: boolean | null
+          claimed_by_user_id?: string | null
+          is_claimed?: boolean | null
+        }
+      }
+      messages: {
+        Row: {
+          id: string
+          created_at: string
+          sender_id: string
+          receiver_id: string | null
+          property_id: string
+          body: string
+          status: 'unread' | 'read' | 'pending_request'
+          thread_id?: string
+          conversation_id?: string
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          sender_id: string
+          receiver_id?: string | null
+          property_id: string
+          body: string
+          status?: 'unread' | 'read' | 'pending_request'
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          sender_id?: string
+          receiver_id?: string | null
+          property_id?: string
+          body?: string
+          status?: 'unread' | 'read' | 'pending_request'
+        }
+      }
+      search_logs: {
+        Row: {
+          id: number
+          created_at: string
+          query: string
+          found_count: number
+          user_id: string | null
+        }
+        Insert: {
+          id?: number
+          created_at?: string
+          query: string
+          found_count: number
+          user_id?: string | null
+        }
+        Update: {
+          id?: number
+          created_at?: string
+          query?: string
+          found_count?: number
+          user_id?: string | null
+        }
+      }
     }
     Views: {
       property_public_view: {

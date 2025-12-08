@@ -3,14 +3,15 @@
 import clsx from 'clsx'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState, useCallback, useEffect, useMemo, type ChangeEvent, useRef } from 'react'
-import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame, Share2, Edit2, MapPin, Save, X } from 'lucide-react'
+import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Edit2, MapPin, Save, X } from 'lucide-react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
 import LayerToggle, { LayerState } from '@/components/Map/LayerToggle'
 import ActivityFeedDrawer from '@/components/Feed/ActivityFeedDrawer'
 import type L from 'leaflet'
 import { uploadHomeStoryImages } from '@/lib/storage'
-import type { MapProperty } from '@/components/Map/ShopMap'
+import type { MapProperty } from '@/types/models'
+import type { Database } from '../lib/database.types'
 import FloatingControls from '@/components/Map/FloatingControls'
 import MapLegend from '@/components/Map/MapLegend'
 import InboxModal from '@/components/Messaging/InboxModal'
@@ -20,6 +21,10 @@ import { usePropertyFollows } from '@/hooks/usePropertyFollows'
 import FilterModal, { FilterState } from '@/components/UI/FilterModal'
 import AreaInsightsPanel from '@/components/Map/AreaInsightsPanel'
 import PropertyInsights from '@/components/Shop/PropertyInsights'
+import { useProperties } from '@/hooks/useProperties'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
+import HomeStorySection from '@/components/Shop/HomeStorySection'
+import MessageModal from '@/components/Messaging/MessageModal'
 
 
 
@@ -40,33 +45,26 @@ type OwnerStatus = 'settled' | 'open' | 'sale' | 'rent'
 type MessageMode = 'direct' | 'note' | 'future'
 
 export default function HomeClient({ shops: initialShops, user: _user, isAdmin, initialFollowedIds = [] }: HomeClientProps) {
-  console.log('[HomeClient] isAdmin prop:', isAdmin);
+
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
   const enableGeolocation = false // keep code for future reintroduction
   const [searchQuery, setSearchQuery] = useState('')
-  const [shops, setShops] = useState<MapProperty[]>(initialShops)
+
+  // Hook Integration
+  const { shops, setShops, fetchProperties: fetchUserShops } = useProperties(initialShops)
+  const { currentUser, setCurrentUser } = useCurrentUser()
+
   const [followedIds, setFollowedIds] = useState<string[]>(initialFollowedIds)
   const [mapCenter, setMapCenter] = useState<[number, number]>([55.035, -1.470]) // Default to Shiremoor/Monkseaton for Pilot
   const [isLocating, setIsLocating] = useState(false)
-  const [selectedHome, setSelectedHome] = useState<any | null>(null)
-  const [claimRecord, setClaimRecord] = useState<any | null>(null)
+  const [selectedHome, setSelectedHome] = useState<MapProperty | null>(null)
+  const [claimRecord, setClaimRecord] = useState<Database['public']['Tables']['property_claims']['Row'] | null>(null)
   const [claiming, setClaiming] = useState(false)
   const [claimError, setClaimError] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<any | null>(null)
-  const [, setAuthLoading] = useState(true)
-  const [homeStory, setHomeStory] = useState<any | null>(null)
-  const [storyLoading, setStoryLoading] = useState(false)
-  const [storyError, setStoryError] = useState<string | null>(null)
-  const [storySummary, setStorySummary] = useState('')
-  const [storyImages, setStoryImages] = useState<string[]>([])
-  const [editingStory, setEditingStory] = useState(false)
-  const [savingStory, setSavingStory] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [newUploads, setNewUploads] = useState<{ url: string; file: File }[]>([])
-  const [imageOrder, setImageOrder] = useState<string[]>([])
-  const [storyForId, setStoryForId] = useState<string | null>(null)
+  // currentUser handled by hook
+
   const [isOpenToTalking, setIsOpenToTalking] = useState(false)
   const [isCheckingClaim, setIsCheckingClaim] = useState(false)
   const [softListingLoading, setSoftListingLoading] = useState(false)
@@ -92,15 +90,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const [adminSaving, setAdminSaving] = useState(false)
 
 
-  const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
-  const [messageMode, setMessageMode] = useState<MessageMode>('direct')
-  const [messageHeader, setMessageHeader] = useState('Message Owner')
-  const [messageSubtext, setMessageSubtext] = useState<string | null>(null)
-  const [messageBody, setMessageBody] = useState('')
-  const [messageSending, setMessageSending] = useState(false)
-  const [messageError, setMessageError] = useState<string | null>(null)
-  const [messageSuccess, setMessageSuccess] = useState<string | null>(null)
+  const [messageModalMode, setMessageModalMode] = useState<MessageMode | undefined>(undefined)
+
+  // Message state moved to MessageModal, we just track open state here
+
   const [pendingRequestCount, setPendingRequestCount] = useState<number>(0)
   const [pendingNotesOpen, setPendingNotesOpen] = useState(false)
   const [pendingNotes, setPendingNotes] = useState<any[]>([])
@@ -111,7 +105,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const [currentBounds, setCurrentBounds] = useState<L.LatLngBounds | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const mapMoveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // fetchDebounceRef removed as it is in useProperties
   const pendingDeepLinkRef = useRef<MapProperty | null>(null)
   const deepLinkHandledRef = useRef<string | null>(null)
   const lastPendingUserKeyRef = useRef<string | null>(null)
@@ -171,45 +165,12 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   })
 
   useEffect(() => {
-    let mounted = true
-
-    async function loadUser() {
-      setAuthLoading(true)
-      const { data, error } = await supabase.auth.getUser()
-      if (!mounted) return
-
-      if (!error) {
-        setCurrentUser(data.user ?? null)
-        if (data.user) {
-          refreshPendingRequestCount(data.user.id, undefined)
-        }
-      } else {
-        console.error('[Auth] getUser error', error)
-        setCurrentUser(null)
-      }
-      setAuthLoading(false)
+    if (currentUser) {
+      refreshPendingRequestCount(currentUser.id, undefined)
+    } else {
+      setPendingRequestCount(0)
     }
-
-    const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (!mounted) return
-        console.log('[Auth] onAuthStateChange', _event, session?.user?.email)
-        setCurrentUser(session?.user ?? null)
-        if (session?.user) {
-          refreshPendingRequestCount(session.user.id, undefined)
-        } else {
-          setPendingRequestCount(0)
-        }
-      }
-    )
-
-    loadUser()
-
-    return () => {
-      mounted = false
-      subscription?.subscription?.unsubscribe()
-    }
-  }, [refreshPendingRequestCount, supabase])
+  }, [currentUser, refreshPendingRequestCount])
 
   const calculateDistance = useCallback((lat1: number, lon1: number, lat2: number, lon2: number): number => {
     const R = 6371
@@ -222,53 +183,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     return R * c
   }, [])
 
-  const fetchUserShops = useCallback((center: [number, number], bounds?: L.LatLngBounds) => {
-    if (fetchDebounceRef.current) {
-      clearTimeout(fetchDebounceRef.current)
-    }
-
-    fetchDebounceRef.current = setTimeout(async () => {
-      try {
-        const params = new URLSearchParams()
-
-        if (bounds) {
-          const sw = bounds.getSouthWest()
-          const ne = bounds.getNorthEast()
-          params.set('south', sw.lat.toString())
-          params.set('west', sw.lng.toString())
-          params.set('north', ne.lat.toString())
-          params.set('east', ne.lng.toString())
-        } else {
-          const [lat, lon] = center
-          const radiusKm = 10
-          const deltaLat = radiusKm / 111
-          const deltaLon = radiusKm / (111 * Math.cos((lat * Math.PI) / 180) || 1)
-          params.set('south', (lat - deltaLat).toString())
-          params.set('north', (lat + deltaLat).toString())
-          params.set('west', (lon - deltaLon).toString())
-          params.set('east', (lon + deltaLon).toString())
-        }
-
-        const url = `/api/properties?${params.toString()}`
-        const response = await fetch(url)
-
-        const contentType = response.headers.get('content-type')
-        if (!contentType || !contentType.includes('application/json')) {
-          console.error('Received non-JSON response from API:', await response.text())
-          throw new Error('API returned invalid format')
-        }
-
-        const json = await response.json()
-        if (!response.ok) {
-          throw new Error(json?.error || response.statusText || 'Failed to fetch properties')
-        }
-
-        setShops(json?.data || [])
-      } catch (error) {
-        console.error('Error fetching properties:', error)
-      }
-    }, 500)
-  }, [])
+  // fetchUserShops is now handled by useProperties hook
 
   const handleMapMove = useCallback((center: [number, number], bounds: L.LatLngBounds) => {
     setMapCenter(center)
@@ -300,26 +215,15 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     if (!selectedHome) {
       setClaimRecord(null)
       setClaimError(null)
-      setEditingStory(false)
       setIsOpenToTalking(false)
       setIsCheckingClaim(false)
       setSoftListingLoading(false)
       setSoftListingSaving(false)
       setSoftListingError(null)
-      setNewUploads([])
-      setImageOrder([])
-      setCurrentImageIndex(0)
-      setCurrentImageIndex(0)
       setIsMessageModalOpen(false)
+      setMessageModalMode(undefined)
       setAdminEditMode(false)
       setAdminEditData(null)
-      setMessageBody('')
-      setMessageError(null)
-      setMessageMode('direct')
-      setMessageHeader('Message Owner')
-      setMessageSubtext(null)
-      setMessageSuccess(null)
-      setMessageSending(false)
       setIsInboxOpen(false)
       setPendingNotesOpen(false)
       setPendingNotes([])
@@ -338,7 +242,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       setClaimRecord(null)
       setIsCheckingClaim(true)
       setClaimError(null)
-      setEditingStory(false)
       setIsOpenToTalking(false)
       setSoftListingLoading(false)
       setSoftListingSaving(false)
@@ -347,7 +250,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       const { data, error } = await supabase
         .from('property_claims')
         .select('*')
-        .eq('property_id', selectedHome.id)
+        .eq('property_id', selectedHome!.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -377,68 +280,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     }
   }, [selectedHome?.id, supabase])
 
-  useEffect(() => {
-    if (!selectedHome) return
-
-    let cancelled = false
-
-    async function loadStory() {
-      setStoryLoading(true)
-      setStoryError(null)
-      setStoryForId(null)
-      setImageOrder([])
-      setStoryImages([])
-      setNewUploads([])
-      setCurrentImageIndex(0)
-      setStorySummary('')
-      setEditingStory(false)
-      setIsMessageModalOpen(false)
-      setMessageBody('')
-      setMessageError(null)
-      setPendingNotesOpen(false)
-      setPendingNotes([])
-      setPendingNotesError(null)
-
-      const currentRequestId = selectedHome.id
-
-      const { data, error } = await supabase
-        .from('home_story')
-        .select('*')
-        .eq('property_id', selectedHome.id)
-        .maybeSingle()
-
-      if (cancelled) {
-        setStoryLoading(false)
-        return
-      }
-
-      if (error) {
-        console.error('Error loading home story', error)
-        setHomeStory(null)
-        setStorySummary('')
-        setStoryImages([])
-        setImageOrder([])
-        setStoryError(error.message)
-      } else {
-        const storyData = data as any
-        setHomeStory(storyData ?? null)
-        setStorySummary(storyData?.summary_text ?? '')
-        setStoryImages((storyData?.images as string[]) ?? [])
-        setImageOrder((storyData?.images as string[]) ?? [])
-        setStoryForId(currentRequestId)
-        setCurrentImageIndex(0)
-        setNewUploads([])
-      }
-
-      setStoryLoading(false)
-    }
-
-    loadStory()
-
-    return () => {
-      cancelled = true
-    }
-  }, [selectedHome?.id, supabase])
+  // Story loading handled by HomeStorySection component
 
   useEffect(() => {
     const currentUserId = currentUser?.id
@@ -461,12 +303,12 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     async function loadSoftListing() {
       setSoftListingLoading(true)
       setSoftListingError(null)
-      const selectedHomeId = selectedHome.id
+      const selectedHomeId = selectedHome!.id
 
       const { data, error } = await supabase
         .from('intent_flags')
         .select('soft_listing,is_for_sale,is_for_rent')
-        .eq('property_id', selectedHome.id)
+        .eq('property_id', selectedHome!.id)
         .eq('owner_id', currentUserId)
         .maybeSingle()
 
@@ -530,7 +372,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           setIsLocating(false)
         },
         (error) => {
-          console.log('Geolocation error:', error.message, '- using default location')
+
           fetchUserShops(mapCenter)
           setIsLocating(false)
         },
@@ -654,152 +496,17 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     }
   }
 
-  const handleOpenMessageModal = async () => {
+  const handleOpenMessageModal = () => {
     if (!selectedHome) return
     if (!currentUser) {
       router.push('/auth/login?redirect=/')
       return
     }
-
-    const { sale, rent, open } = computeIntentFlags()
-    const nextMode: MessageMode = sale || rent || open ? 'direct' : 'note'
-    const header = nextMode === 'direct' ? 'Message Owner' : 'Leave an Interest Note'
-    const subtext = nextMode === 'note'
-      ? 'This owner isn\'t actively looking. We will let them know you are interested, but they may not reply immediately.'
-      : null
-
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-    const { count: sentCount, error: rateLimitError } = await (supabase as any)
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('sender_id', currentUser.id)
-      .gte('created_at', since)
-
-    if (rateLimitError) {
-      console.error('Error checking message rate limit', rateLimitError)
-      setMessageError('Could not start a new conversation right now.')
-      return
-    }
-
-    if ((sentCount ?? 0) >= 5) {
-      alert('You have reached your daily limit for starting new conversations.')
-      return
-    }
-
-    const { data: existingThread, error: existingThreadError } = await (supabase as any)
-      .from('messages')
-      .select('*')
-      .eq('sender_id', currentUser.id)
-      .eq('property_id', selectedHome.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (!existingThreadError && existingThread) {
-      const threadId = (existingThread as any)?.thread_id ?? (existingThread as any)?.conversation_id ?? existingThread.id
-      if (threadId) {
-        router.push(`/messages/${threadId}`)
-        return
-      }
-    } else if (existingThreadError) {
-      console.error('Error checking existing thread', existingThreadError)
-    }
-
-    setMessageMode(nextMode)
-    setMessageHeader(header)
-    setMessageSubtext(subtext)
-    setMessageBody('')
-    setMessageError(null)
+    setMessageModalMode(undefined) // Auto-detect
     setIsMessageModalOpen(true)
   }
 
-  const handleSendMessage = async () => {
-    if (!selectedHome || !currentUser) return
-    const body = messageBody.trim()
-    if (!body) {
-      setMessageError('Please enter a message.')
-      return
-    }
-    setMessageSending(true)
-    setMessageError(null)
-
-    try {
-      const status = messageMode === 'direct' ? 'unread' : 'pending_request'
-      const recipientId = messageMode === 'future' ? null : (claimRecord?.user_id ?? selectedHome.claimed_by_user_id ?? null)
-
-      await inboxSendMessage(selectedHome.id, body, recipientId ?? null, status)
-
-      setIsMessageModalOpen(false)
-      setMessageBody('')
-      setMessageMode('direct')
-      setMessageHeader('Message Owner')
-      setMessageSubtext(null)
-      if (messageMode === 'future') {
-        setMessageSuccess('Your note has been saved and will be delivered when the owner joins Nest.')
-        setTimeout(() => setMessageSuccess(null), 4000)
-      }
-    } catch (err: any) {
-      setMessageError(err.message ?? 'Failed to send message')
-    } finally {
-      setMessageSending(false)
-    }
-  }
-
-  const handleStoryFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    const selected = files ? Array.from(files) : []
-    if (!selected.length) return
-    const allowed = Math.max(0, 4 - imageOrder.length)
-    if (allowed <= 0) {
-      alert('You can upload up to 4 photos. Remove one to add another.')
-      return
-    }
-    const newFiles = selected.slice(0, allowed)
-    if (newFiles.length < selected.length) {
-      alert('Only the first 4 photos were added (max 4 total).')
-    }
-    const additions = newFiles.map((file) => ({ url: URL.createObjectURL(file), file }))
-    const additionUrls = additions.map((a) => a.url)
-    setNewUploads((prev) => {
-      const next = [...prev, ...additions]
-      return next
-    })
-    setImageOrder((prev) => [...prev, ...additionUrls])
-    setCurrentImageIndex(imageOrder.length) // jump to first new image
-    setEditingStory(true)
-  }
-
-  const handleDeleteImage = () => {
-    if (!displayImages.length) return
-    setEditingStory(true)
-    setImageOrder((prev) => {
-      const targetUrl = prev[currentImageIndex]
-      const nextOrder = prev.filter((_, idx) => idx !== currentImageIndex)
-      setStoryImages((imgs) => imgs.filter((img) => img !== targetUrl))
-      setNewUploads((uploads) => {
-        const nextUploads = uploads.filter((u) => u.url !== targetUrl)
-        return nextUploads
-      })
-      setCurrentImageIndex((idx) => {
-        const len = nextOrder.length
-        if (len === 0) return 0
-        return Math.min(idx, len - 1)
-      })
-      return nextOrder
-    })
-  }
-
-  const handleMakeMain = () => {
-    if (!displayImages.length || currentImageIndex === 0) return
-    setEditingStory(true)
-    setImageOrder((prev) => {
-      const next = [...prev]
-      const [item] = next.splice(currentImageIndex, 1)
-      next.unshift(item)
-      return next
-    })
-    setCurrentImageIndex(0)
-  }
+  // Image handlers moved to HomeStorySection
 
   const handleViewPendingNotes = async () => {
     if (!currentUser) return
@@ -918,7 +625,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           soft_listing: nextSoft,
           is_for_sale: nextSale,
           is_for_rent: nextRent,
-        },
+        } as any,
         { onConflict: 'property_id' }
       )
       .select()
@@ -953,69 +660,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     setSoftListingSaving(false)
   }
 
-  const handleSaveStory = async () => {
-    if (!selectedHome) return
-    if (!isClaimedByYou) {
-      setStoryError('Only the claimant can edit this home story.')
-      return
-    }
-
-    setSavingStory(true)
-    setStoryError(null)
-
-    try {
-      const uploadMap = new Map(newUploads.map((u) => [u.url, u.file]))
-      const pendingUploads = imageOrder.filter((url) => uploadMap.has(url))
-      const filesToUpload = pendingUploads.map((url) => uploadMap.get(url)).filter((file): file is File => !!file)
-
-      let uploadedUrls: string[] = []
-      if (filesToUpload.length) {
-        uploadedUrls = await uploadHomeStoryImages(supabase, selectedHome.id, filesToUpload)
-      }
-
-      let uploadIndex = 0
-      const finalImages = imageOrder
-        .map((url) => {
-          if (uploadMap.has(url)) {
-            const uploaded = uploadedUrls[uploadIndex]
-            uploadIndex += 1
-            return uploaded ?? null
-          }
-          return url
-        })
-        .filter((url): url is string => !!url)
-
-      const { data, error } = await supabase
-        .from('home_story')
-        .upsert(
-          {
-            property_id: selectedHome.id,
-            summary_text: storySummary || null,
-            images: finalImages.length ? finalImages : null,
-          } as any,
-          { onConflict: 'property_id' } // respect unique constraint for one story per property
-        )
-        .select('*')
-        .single()
-
-      if (error) {
-        setStoryError(error.message)
-        return
-      }
-
-      setHomeStory(data)
-      const storyData = data as any
-      setStoryImages(storyData?.images ?? finalImages)
-      setImageOrder(storyData?.images ?? finalImages)
-      setNewUploads([])
-      setCurrentImageIndex(0)
-      setEditingStory(false)
-    } catch (err: any) {
-      setStoryError(err.message ?? 'Failed to save home story')
-    } finally {
-      setSavingStory(false)
-    }
-  }
+  // Story Save logic moved to HomeStorySection
 
   const currentUserId = currentUser?.id
   const propertyIsClaimed = !!(
@@ -1036,8 +681,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       : isOpenToTalking
         ? 'open'
         : 'settled'
-  const displayImages = imageOrder
-  const storyMatchesSelection = storyForId === selectedHome?.id
+
+  /* const effectiveIntentFlags = computeIntentFlags() */
 
   const renderOwnershipControls = () => {
     if (claimRecord && claimRecord.property_id === selectedHome?.id && claimRecord.user_id === currentUserId) {
@@ -1124,11 +769,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           type="button"
           className="w-full py-3 mt-3 bg-white border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 flex items-center justify-center gap-2 shadow-sm"
           onClick={() => {
-            setMessageMode('future')
-            setMessageHeader('Leave a note for the future owner')
-            setMessageSubtext('This home isn\'t claimed yet. We\'ll save your note and notify the owner the moment they join Nest.')
-            setMessageBody('')
-            setMessageError(null)
+            setMessageModalMode('future')
             setIsMessageModalOpen(true)
           }}
         >
@@ -1186,13 +827,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
   useEffect(() => {
     setIsMessageModalOpen(false)
-    setMessageBody('')
-    setMessageError(null)
-    setMessageMode('direct')
-    setMessageHeader('Message Owner')
-    setMessageSubtext(null)
-    setMessageSuccess(null)
-    setMessageSending(false)
+    setMessageModalMode(undefined)
   }, [selectedHome?.id])
 
   const handleLogout = async () => {
@@ -1341,7 +976,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       pendingDeepLinkRef.current = null
     }
   }, [mapReady])
-  console.log('[HomeClient] isAdmin:', isAdmin)
+
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-white">
@@ -1505,102 +1140,12 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                 </div>
               )}
 
-              {storyLoading && !storyMatchesSelection ? (
-                <div className="h-full w-full bg-slate-200 animate-pulse" />
-              ) : displayImages.length === 0 ? (
-                <button
-                  type="button"
-                  className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-500 transition"
-                  onClick={() => {
-                    if (!isClaimedByYou) return
-                    fileInputRef.current?.click()
-                  }}
-                  disabled={!isClaimedByYou}
-                >
-                  <Camera className="h-10 w-10" />
-                  <span className="text-sm font-medium">Add photos of your home</span>
-                </button>
-              ) : (
-                <div className="relative h-full w-full overflow-hidden">
-                  <img
-                    src={displayImages[currentImageIndex]}
-                    alt="Home"
-                    className="h-full w-full object-cover"
-                  />
-
-                  {displayImages.length > 1 && (
-                    <>
-                      <button
-                        type="button"
-                        className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
-                        onClick={() => setCurrentImageIndex((idx) => (idx === 0 ? displayImages.length - 1 : idx - 1))}
-                        aria-label="Previous photo"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
-                      <button
-                        type="button"
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
-                        onClick={() => setCurrentImageIndex((idx) => (idx === displayImages.length - 1 ? 0 : idx + 1))}
-                        aria-label="Next photo"
-                      >
-                        <ChevronRight className="h-5 w-5" />
-                      </button>
-                      <span className="absolute bottom-3 right-3 rounded-full bg-black/60 px-3 py-1 text-xs font-semibold text-white">
-                        {currentImageIndex + 1} / {displayImages.length}
-                      </span>
-                    </>
-                  )}
-
-                  {isClaimedByYou && (
-                    <>
-                      <button
-                        type="button"
-                        className="absolute top-3 right-12 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
-                        onClick={() => fileInputRef.current?.click()}
-                        aria-label="Add photo"
-                      >
-                        <Plus className="h-5 w-5" />
-                      </button>
-                      <button
-                        type="button"
-                        className="absolute top-3 left-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-red-600 shadow hover:bg-white"
-                        onClick={handleDeleteImage}
-                        aria-label="Delete photo"
-                        disabled={!displayImages.length}
-                      >
-                        <Trash2 className="h-5 w-5" />
-                      </button>
-                      <button
-                        type="button"
-                        className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-white"
-                        onClick={handleMakeMain}
-                        disabled={!displayImages.length}
-                      >
-                        {currentImageIndex === 0 ? (
-                          <span className="inline-flex items-center gap-1 text-[#007C7C]">
-                            <Star className="h-4 w-4 fill-[#007C7C] text-[#007C7C]" />
-                            Main Photo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1">
-                            <StarOff className="h-4 w-4" />
-                            Make Main
-                          </span>
-                        )}
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/*"
-                className="hidden"
-                onChange={handleStoryFileChange}
-              />
+              {/* Hero Image Section - Removed in favor of HomeStorySection gallery for now
+                  If needed, we can re-add a read-only hero image from selectedHome or HomeStory
+              */}
+              <div className="w-full bg-slate-100">
+                {/* Placeholder for potential hero image or just relying on StorySection below */}
+              </div>
             </div>
 
             {/* Content */}
@@ -1806,132 +1351,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                 </p>
               )}
 
-              <div className="pt-2 border-t border-gray-200">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-base font-semibold text-gray-900">About this home</h3>
-                  {homeStory && isClaimedByYou && !editingStory && (
-                    <button
-                      className="text-sm text-amber-700 hover:text-amber-800 font-semibold"
-                      onClick={() => setEditingStory(true)}
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-
-                {storyLoading || !storyMatchesSelection ? (
-                  <div className="space-y-2">
-                    <div className="h-4 w-32 bg-slate-200 rounded animate-pulse"></div>
-                    <div className="h-16 w-full bg-slate-200 rounded animate-pulse"></div>
-                  </div>
-                ) : (
-                  <>
-                    {storyError && (
-                      <div className="mb-3 text-sm text-red-600">
-                        {storyError}
-                      </div>
-                    )}
-
-                    {isClaimedByYou ? (
-                      <>
-                        {(!homeStory || editingStory) ? (
-                          <div className="space-y-3">
-                            <div>
-                              <textarea
-                                value={storySummary}
-                                onChange={(e) => setStorySummary(e.target.value)}
-                                rows={4}
-                                className="w-full min-h-[120px] bg-slate-50 border-0 rounded-xl p-4 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                placeholder="Tell neighbors what you love about living here..."
-                              />
-                            </div>
-
-                            {homeStory && (
-                              <div className="flex justify-end">
-                                <button
-                                  className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                                  onClick={() => {
-                                    setEditingStory(false)
-                                    setStorySummary(homeStory?.summary_text ?? '')
-                                    setStoryImages(homeStory?.images ?? [])
-                                    setImageOrder(homeStory?.images ?? [])
-                                    setNewUploads([])
-                                    setCurrentImageIndex(0)
-                                    setStoryError(null)
-                                  }}
-                                  type="button"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {homeStory?.summary_text ? (
-                              <p className="text-sm text-gray-800 whitespace-pre-line">
-                                {homeStory.summary_text}
-                              </p>
-                            ) : (
-                              <p className="text-sm text-gray-500">No story added yet.</p>
-                            )}
-                            {homeStory?.images?.length ? (
-                              <div className="grid grid-cols-3 gap-2">
-                                {homeStory.images.map((url: string) => (
-                                  <img
-                                    key={url}
-                                    src={url}
-                                    alt="Home story"
-                                    className="h-16 w-full object-cover rounded-md border"
-                                  />
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {homeStory ? (
-                          <div className="space-y-2">
-                            {homeStory.summary_text ? (
-                              <p className="text-sm text-gray-800 whitespace-pre-line">
-                                {homeStory.summary_text}
-                              </p>
-                            ) : (
-                              <p className="text-sm text-gray-500">No story text provided.</p>
-                            )}
-                            {homeStory.images?.length ? (
-                              <div className="grid grid-cols-3 gap-2">
-                                {homeStory.images.map((url: string) => (
-                                  <img
-                                    key={url}
-                                    src={url}
-                                    alt="Home story"
-                                    className="h-16 w-full object-cover rounded-md border"
-                                  />
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-gray-500">No home story yet.</p>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {isClaimedByYou && (editingStory || !homeStory) && (
-                <button
-                  className="mt-4 w-full py-3.5 rounded-full font-semibold text-white bg-[#007C7C] shadow-lg transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleSaveStory}
-                  disabled={savingStory}
-                >
-                  {savingStory ? 'Saving...' : 'Update details'}
-                </button>
-              )}
+              <HomeStorySection
+                selectedHome={selectedHome!}
+                currentUser={currentUser}
+                isClaimedByYou={isClaimedByYou}
+              />
 
               <div className="mt-8 text-center">
                 <button
@@ -1963,79 +1387,16 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         onMarkRead={(propertyId, partnerId) => markThreadRead(propertyId, partnerId)}
       />
 
-      {
-        messageSuccess && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] rounded-full bg-[#007C7C] text-white px-4 py-2 shadow-lg">
-            {messageSuccess}
-          </div>
-        )
-      }
-
-      {
-        isMessageModalOpen && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
-            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-              <div className="flex items-start justify-between border-b border-slate-200 p-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{messageHeader}</h3>
-                  {messageSubtext && (
-                    <p className="mt-1 text-xs text-slate-500">{messageSubtext}</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  onClick={() => setIsMessageModalOpen(false)}
-                  aria-label="Close message modal"
-                >
-                  &times;
-                </button>
-              </div>
-
-              <div className="p-4 space-y-3">
-                <textarea
-                  className="w-full rounded-xl border border-slate-200 p-3 text-sm text-slate-800 focus:border-[#007C7C] focus:outline-none focus:ring-2 focus:ring-[#007C7C]/20"
-                  rows={4}
-                  placeholder={
-                    messageMode === 'direct'
-                      ? 'Write a message to the owner...'
-                      : messageMode === 'future'
-                        ? 'Leave a note for the future owner...'
-                        : 'Tell the owner you are interested...'
-                  }
-                  value={messageBody}
-                  onChange={(e) => setMessageBody(e.target.value)}
-                />
-                {messageError && (
-                  <p className="text-xs text-red-600">{messageError}</p>
-                )}
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-slate-200 p-4">
-                <button
-                  type="button"
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                  onClick={() => setIsMessageModalOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-[#007C7C] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#006868] disabled:opacity-60"
-                  onClick={handleSendMessage}
-                  disabled={messageSending || !messageBody.trim()}
-                >
-                  {messageSending
-                    ? 'Sending...'
-                    : messageMode === 'direct'
-                      ? 'Send message'
-                      : 'Send note'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      }
+      {selectedHome && (
+        <MessageModal
+          isOpen={isMessageModalOpen}
+          initialMode={messageModalMode}
+          onClose={() => setIsMessageModalOpen(false)}
+          selectedHome={selectedHome}
+          currentUser={currentUser}
+          intentFlags={computeIntentFlags()}
+        />
+      )}
     </div>
   )
 }

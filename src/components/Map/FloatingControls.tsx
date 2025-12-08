@@ -1,7 +1,8 @@
 import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon, RefreshCw, Flame, MessageCircle, Globe, SlidersHorizontal } from "lucide-react";
+import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon, RefreshCw, Flame, MessageCircle, Globe, SlidersHorizontal, LayoutDashboard, PlusCircle } from "lucide-react";
 import NotificationBell from "@/components/Notifications/NotificationBell";
+import { getSupabaseClient } from "@/lib/supabaseClient";
 
 interface FloatingControlsProps {
   searchQuery: string;
@@ -16,6 +17,8 @@ interface FloatingControlsProps {
   heatmapMode?: 'all' | 'market' | 'social' | null;
   onSetHeatmapMode?: (mode: 'all' | 'market' | 'social' | null) => void;
   onOpenFilters?: () => void;
+  isAdmin?: boolean;
+  onAddHomeClick?: () => void;
 }
 
 export default function FloatingControls({
@@ -30,13 +33,41 @@ export default function FloatingControls({
   onOpenActivity,
   heatmapMode,
   onSetHeatmapMode,
-  onOpenFilters
+  onOpenFilters,
+  isAdmin,
+  onAddHomeClick
 }: FloatingControlsProps) {
   const [suggestions, setSuggestions] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [fetchedIsAdmin, setFetchedIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!isAdmin && currentUser?.id) {
+      const checkAdmin = async () => {
+        const userId = currentUser.id!;
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('user_id', userId)
+          .single();
+
+        const profile = data as any;
+
+        if (profile?.role === 'admin') {
+          setFetchedIsAdmin(true);
+        }
+      };
+
+      checkAdmin();
+    }
+  }, [isAdmin, currentUser]);
+
+  const effectiveIsAdmin = isAdmin || fetchedIsAdmin;
+
   const handleSearch = (e: ChangeEvent<HTMLInputElement>) => {
     onSearchChange(e.target.value);
     setShowSuggestions(true);
@@ -236,6 +267,29 @@ export default function FloatingControls({
                     <div className="text-xs text-gray-500 px-3 py-2 border-b border-gray-100 truncate">
                       {currentUser.email}
                     </div>
+                    {effectiveIsAdmin && (
+                      <>
+                        <a
+                          href="/admin/dashboard"
+                          onClick={() => setMenuOpen(false)}
+                          className="mt-1 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-red-600 font-semibold hover:bg-red-50"
+                        >
+                          <LayoutDashboard className="h-4 w-4" />
+                          Admin Dashboard
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onAddHomeClick?.();
+                          }}
+                          className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-teal-700 font-semibold hover:bg-teal-50"
+                        >
+                          <PlusCircle className="h-4 w-4" />
+                          Add New Home
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={() => {

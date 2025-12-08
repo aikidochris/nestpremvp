@@ -207,7 +207,68 @@ export type Database = {
         }
       }
     }
-    Functions: {}
+    Functions: {
+      get_admin_stats: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      get_admin_export_data: {
+        Args: {
+          export_type: string
+        }
+        Returns: Json
+      }
+      admin_list_users: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      admin_list_claims: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      admin_update_claim_status: {
+        Args: {
+          claim_id: string
+          new_status: string
+        }
+        Returns: void
+      }
+      admin_delete_user: {
+        Args: {
+          target_user_id: string
+        }
+        Returns: void
+      }
+      admin_create_property: {
+        Args: {
+          lat: number
+          lon: number
+          address_data: Json
+        }
+        Returns: string
+      }
+      admin_update_property: {
+        Args: {
+          property_id: string
+          update_data: Json
+        }
+        Returns: void
+      }
+      admin_delete_property: {
+        Args: {
+          target_property_id: string
+        }
+        Returns: void
+      }
+      admin_move_pin: {
+        Args: {
+          target_property_id: string
+          new_lat: number
+          new_lon: number
+        }
+        Returns: void
+      }
+    }
     Enums: {}
   }
 }

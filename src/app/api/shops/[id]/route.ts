@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 
 export async function GET(
   request: NextRequest,
@@ -7,155 +7,45 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    console.log('[API /shops/[id]] GET request for shop ID:', id)
-    
     const supabase = await createClient()
-    
-    // Check authentication status
-    const { data: { user } } = await supabase.auth.getUser()
-    console.log('[API /shops/[id]] User authenticated:', !!user, user?.id)
-    
-    const { data, error } = await (supabase as any)
-      .from('shops')
+
+    // 1. Query the new "World Class" Data View
+    const { data, error } = await supabase
+      .from('property_public_view')
       .select(`
-        *,
-        shop_images (*),
-        comments (
-          *,
-          profiles (display_name, avatar_url)
-        )
+        id:property_id,
+        lat,
+        lon,
+        postcode,
+        street,
+        house_number,
+        display_label,
+        last_sale_price,
+        last_sale_date,
+        energy_rating,
+        epc_floor_area,
+        epc_property_type,
+        is_claimed,
+        is_for_sale
       `)
-      .eq('id', id)
+      .eq('property_id', id)
       .single()
-    
-    console.log('[API /shops/[id]] Query result:', {
-      hasData: !!data,
-      error: error?.message,
-      errorCode: error?.code,
-      errorDetails: error?.details,
-      errorHint: error?.hint
-    })
-    
+
     if (error) {
-      console.error('[API /shops/[id]] Error fetching shop:', {
-        id,
-        error: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
-      })
-      return NextResponse.json({
-        error: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
-      }, { status: 404 })
+      console.error('API Error:', error)
+      return NextResponse.json({ error: error.message }, { status: 404 })
     }
-    
-    // Get vote counts
-    const { data: voteData } = await (supabase as any)
-      .rpc('calculate_shop_score', { shop_uuid: id })
-    
-    return NextResponse.json({ 
+
+    // 2. Return the data with a default votes object (to prevent frontend errors)
+    return NextResponse.json({
       data: {
         ...data,
-        votes: voteData?.[0] || { quality_score: 0, bitcoin_verified_score: 0, total_votes: 0 }
+        votes: { quality_score: 0, bitcoin_verified_score: 0, total_votes: 0 }
       }
     })
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params
-    const supabase = await createClient()
-    const serviceRoleClient = createServiceRoleClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    
-    // Check if user is admin
-    const { data: profile } = await (supabase as any)
-      .from('profiles')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-    
-    if (!profile?.is_admin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-    
-    const body = await request.json()
-    
-    // Use service role client to bypass RLS
-    const { data, error } = await (serviceRoleClient as any)
-      .from('shops')
-      .update(body)
-      .eq('id', id)
-      .select()
-      .single()
-    
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-    
-    return NextResponse.json({ data })
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
-
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    
-    // Check if user is admin
-    const { data: profile } = await (supabase as any)
-      .from('profiles')
-      .select('is_admin')
-      .eq('id', user.id)
-      .single()
-    
-    if (!profile?.is_admin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-    
-    const { error } = await (supabase as any)
-      .from('shops')
-      .delete()
-      .eq('id', id)
-    
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-    
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    console.error('Server Error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

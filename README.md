@@ -1,37 +1,45 @@
-# BitcoinLatte ☕️₿
+# Nest
 
-> Discover coffee shops that accept Bitcoin and cryptocurrency payments
-
-A location-based Progressive Web App (PWA) for finding and sharing coffee shops that accept Bitcoin and other cryptocurrencies. Built with Next.js, Tailwind CSS, and Supabase.
+A powerful property intelligence and social discovery platform. Nest aggregates market data, demand signals, and deep property insights into a unified, interactive map experience.
 
 ## 🌟 Features
 
-- 🗺️ **Interactive Map** - Browse coffee shops on an interactive Leaflet.js map
-- 📍 **Location-Based Discovery** - Find nearby Bitcoin-accepting coffee shops
-- 🔐 **Magic Link Authentication** - Passwordless login via email
-- 📝 **Anonymous Submissions** - Submit shops without creating an account
-- 👍 **Voting System** - Vote on shop quality and Bitcoin acceptance
-- 💬 **Comments & Reviews** - Share experiences and tips
-- 👨‍💼 **Admin Dashboard** - Review and approve submissions
-- 📱 **Progressive Web App** - Install on mobile devices for offline access
-- 🎨 **Responsive Design** - Mobile-first design with Tailwind CSS
+### 🗺️ Interactive Intelligence Map
+- **Dynamic Layers**: Switch between "Buzz" (Demand Heatmap) and "Supply" (Market Listings) views.
+- **Shadow Market**: Visualize real-time market data imported from major portals (e.g., Rightmove).
+- **Property Claims**: Users can "claim" properties to signal ownership or intent, driving the social verification layer.
+
+### 🏠 Deep Property Insights
+- **History & Analytics**: Access sold price history, EPC data, and listing archives for any property.
+- **Smart Data Ingestion**: Automated pipelines to ingest and standardize property data from various sources.
+- **Intent Flags**: Signal specific interests (e.g., "Buying", "Selling", "Just Looking") to other users.
+
+### ⚡ Activity & Social
+- **Live Activity Feed**: Real-time stream of property claims, new listings, and high-signal market movements.
+- **Messaging**: Direct communication channels for users.
+- **Stories**: Share verified "Home Stories" attached to specific locations.
+
+## �️ Tech Stack
+
+- **Framework**: [Next.js 16](https://nextjs.org/) (App Router)
+- **Database & Auth**: [Supabase](https://supabase.com/) (PostgreSQL + Realtime)
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **Maps**: [Leaflet.js](https://leafletjs.com/) with `react-leaflet` & `react-leaflet-heatmap-layer-v3`
+- **Deployment**: Railway / Vercel
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-
-- Node.js 20 or newer
-- pnpm 10 or newer
-- Supabase account
-- HERE.com API key (for geocoding)
-- ValueSERP API key (optional, for Google venue data)
+- Node.js 20+
+- pnpm 10+
+- Supabase project
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/bitcoinlatte.git
-   cd bitcoinlatte
+   git clone <repo-url>
+   cd nestpremvp
    ```
 
 2. **Install dependencies**
@@ -39,145 +47,39 @@ A location-based Progressive Web App (PWA) for finding and sharing coffee shops 
    pnpm install
    ```
 
-3. **Set up environment variables**
+3. **Environment Setup**
+   Copy `.env.example` to `.env.local` and configure your keys:
    ```bash
    cp .env.example .env.local
    ```
    
-   Edit `.env.local` and add your credentials:
-   ```env
-   NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-   HERE_API_KEY=your_here_api_key
-   VALUESERP_API_KEY=your_valueserp_api_key
-   NEXT_PUBLIC_SITE_URL=http://localhost:3000
-   ```
+   Required variables:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY` (for admin scripts)
+   - `HERE_API_KEY` (Geocoding)
 
-4. **Set up Supabase**
-   
-   Run the migrations in your Supabase project:
-   ```bash
-   # Option 1: Using Supabase CLI (recommended)
-   pnpx supabase db push
-   
-   # Option 2: Manually in Supabase SQL Editor
-   # Copy and paste the contents of:
-   # - supabase/migrations/001_initial_schema.sql
-   # - supabase/migrations/002_rls_policies.sql
-   ```
-
-5. **Create Storage Bucket**
-   
-   In your Supabase project dashboard:
-   - Go to Storage
-   - Create a new bucket named `shop-images`
-   - Set it to public
-   - Configure policies (see `docs/DATABASE_SCHEMA.md`)
-
-6. **Run the development server**
+4. **Run Development Server**
    ```bash
    pnpm dev
    ```
+   Open [http://localhost:3000](http://localhost:3000).
 
-7. **Open your browser**
-   
-   Navigate to [http://localhost:3000](http://localhost:3000)
+## �️ Data Pipelines
 
-## 📚 Documentation
+Nest features robust data ingestion scripts located in `scripts/`:
+
+- `import_shadow_market.ts`: Ingests active listings from CSV data, matching them against the Master Address Database.
+- `import_osm_properties.ts`: Imports base property data from OpenStreetMap.
+
+## � Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) - System architecture and design decisions
-- [Database Schema](docs/DATABASE_SCHEMA.md) - Complete database schema with SQL
-- [Implementation Guide](docs/IMPLEMENTATION_GUIDE.md) - Step-by-step implementation guide
+- [Database Schema](docs/DATABASE_SCHEMA.md) - Complete database schema
+- [Data Ingestion SOP](docs/DATA_INGESTION_SOP.md) - Standard Operating Procedures for data pipelines
 - [User Flows](docs/USER_FLOWS.md) - User journey diagrams
+- [Admin Setup](docs/ADMIN_SETUP.md) - Guide for setting up admin capabilities
 
-## 🛠️ Tech Stack
+## �📄 License
 
-### Frontend
-- **Framework**: Next.js 16+ (App Router)
-- **Styling**: Tailwind CSS
-- **Maps**: Leaflet.js
-- **PWA**: next-pwa
-
-### Backend
-- **Database**: Supabase (PostgreSQL)
-- **Authentication**: Supabase Auth (Magic Link)
-- **Storage**: Supabase Storage
-- **API**: Next.js API Routes (Server-side only)
-
-### External APIs
-- **Geocoding**: HERE.com API
-- **Venue Data**: ValueSERP (Google venue data)
-
-## 🚢 Deployment
-
-### Railway
-
-This project is configured for Railway deployment:
-
-```bash
-# Install Railway CLI
-npm i -g @railway/cli
-
-# Login to Railway
-railway login
-
-# Link to your project
-railway link
-
-# Deploy
-railway up
-```
-
-The `railway.toml` file contains all necessary configuration.
-
-### Vercel (Alternative)
-
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel
-```
-
-## 📝 Scripts
-
-```bash
-# Development
-pnpm dev          # Start development server
-pnpm build        # Build for production
-pnpm start        # Start production server
-pnpm lint         # Run ESLint
-
-# Supabase
-pnpx supabase start      # Start local Supabase
-pnpx supabase stop       # Stop local Supabase
-pnpx supabase db push    # Push migrations to remote
-pnpx supabase db pull    # Pull schema from remote
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
-
-## 📄 License
-
-This project is open source and available under the [MIT License](LICENSE).
-
-## 🙏 Acknowledgments
-
-- [Supabase](https://supabase.com) - Backend infrastructure
-- [Next.js](https://nextjs.org) - React framework
-- [Leaflet](https://leafletjs.com) - Interactive maps
-- [HERE.com](https://developer.here.com) - Geocoding services
-- [Tailwind CSS](https://tailwindcss.com) - Styling
-
-## 📧 Contact
-
-- Website: [bitcoinlatte.com](https://bitcoinlatte.com)
-- GitHub: [@yourusername](https://github.com/yourusername)
-
----
-
-Made with ☕️ and ₿ by the BitcoinLatte team
+Proprietary / Private (See LICENSE if applicable)

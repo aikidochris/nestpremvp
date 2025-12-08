@@ -39,6 +39,11 @@ export type MapProperty = {
   is_for_rent: boolean
   has_recent_activity: boolean
   image_url?: string | null
+  last_sale_price?: number | null
+  last_sale_date?: string | null
+  energy_rating?: string | null
+  epc_floor_area?: number | null
+  epc_property_type?: string | null
   signals?: {
     is_for_sale: boolean
     is_for_rent: boolean

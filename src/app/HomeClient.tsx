@@ -19,6 +19,8 @@ import FollowButton from '@/components/Social/FollowButton'
 import { usePropertyFollows } from '@/hooks/usePropertyFollows'
 import FilterModal, { FilterState } from '@/components/UI/FilterModal'
 import AreaInsightsPanel from '@/components/Map/AreaInsightsPanel'
+import PropertyInsights from '@/components/Shop/PropertyInsights'
+
 
 
 
@@ -1750,6 +1752,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                   </>
                 )}
               </div>
+
+              <PropertyInsights property={selectedHome} />
 
               {canMessageOwner && (
                 <button

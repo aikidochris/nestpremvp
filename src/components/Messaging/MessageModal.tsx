@@ -65,7 +65,12 @@ export default function MessageModal({ isOpen, onClose, selectedHome, currentUse
         setMessageError(null)
 
         try {
-            // Enforce rate limit (basic check)
+            // 1. Guard against Null Recipient for Direct Messages
+            if (messageMode === 'direct' && !selectedHome.claimed_by_user_id) {
+                throw new Error("Cannot message owner: This home is unclaimed.")
+            }
+
+            // 2. Enforce Rate Limit (Local Check)
             const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
             const { count: sentCount, error: rateLimitError } = await (supabase as any)
                 .from('messages')
@@ -78,23 +83,26 @@ export default function MessageModal({ isOpen, onClose, selectedHome, currentUse
                 throw new Error('You have sent too many messages today. Please try again tomorrow.')
             }
 
-            // Check if conversation exists
-            // TODO: Use better logic for threading, simplified for now
-
+            // 3. Prepare Payload
+            // Allow receiver_id to be null if it's a future note
             const payload = {
                 sender_id: currentUser.id,
-                receiver_id: selectedHome.claimed_by_user_id, // Might be null for notes?
+                receiver_id: selectedHome.claimed_by_user_id || null,
                 property_id: selectedHome.id,
                 body: messageBody,
-                status: messageMode === 'note' ? 'pending_request' : 'unread',
-                // conversation_id? 
+                status: messageMode === 'note' ? 'pending_request' :
+                    messageMode === 'future' ? 'future_note' : 'unread',
             }
 
-            const { error } = await (supabase as any) // Types missing for messages insert currently in strict mode
+            // 4. Send
+            const { error } = await (supabase as any)
                 .from('messages')
                 .insert(payload)
 
-            if (error) throw error
+            if (error) {
+                console.error('Supabase Insert Error:', JSON.stringify(error, null, 2))
+                throw new Error(error.message || "Database insert failed")
+            }
 
             setMessageSuccess('Message sent successfully!')
             setTimeout(() => {
@@ -102,7 +110,7 @@ export default function MessageModal({ isOpen, onClose, selectedHome, currentUse
             }, 1500)
 
         } catch (e: any) {
-            console.error('Send error:', e)
+            console.error('Send error details:', JSON.stringify(e, null, 2))
             setMessageError(e.message || 'Failed to send message')
         } finally {
             setMessageSending(false)

@@ -176,11 +176,8 @@ export default function AreaPulsePanel({ currentCenter, currentZoom, className }
     const [activeTab, setActiveTab] = useState<'live' | 'vibe'>('live');
     const [tickerIndex, setTickerIndex] = useState(0);
     const { feedItems, isLoading } = useActivityFeed(null); // Global feed
-    const displayFeed = (!isLoading && feedItems && feedItems.length > 0) ? feedItems : [
-        { event_id: 'm1', type: 'STATUS', created_at: new Date().toISOString(), summary_text: 'Welcome to Nest! The pulse of the market is here.', property_id: '' },
-        { event_id: 'm2', type: 'CLAIM', created_at: new Date(Date.now() - 3600000).toISOString(), summary_text: '3 New Neighbors joined North Tyneside today.', property_id: '' },
-        { event_id: 'm3', type: 'STORY', created_at: new Date(Date.now() - 7200000).toISOString(), summary_text: 'Local stories are being added in Whitley Bay.', property_id: '' }
-    ] as any[];
+    // Real Feed without Mock Fillers
+    const displayFeed = (!isLoading && feedItems) ? feedItems : [];
 
     // Determine current Vibe based on center
     const currentVibe = useMemo(() => {
@@ -190,18 +187,22 @@ export default function AreaPulsePanel({ currentCenter, currentZoom, className }
 
     // Ticker Logic
     const tickerItems = useMemo(() => {
-        const items = ["🔥 Live: Market is moving fast today..."]; // Default
-        // Add items to ticker
-        displayFeed.slice(0, 3).forEach(item => {
-            items.push(`📢 ${item.summary_text}`);
-        });
+        const items = [];
+        if (displayFeed.length > 0) {
+            items.push(`🔥 Live: ${displayFeed[0].summary_text}`);
+            if (displayFeed[1]) items.push(`📢 ${displayFeed[1].summary_text}`);
+            if (displayFeed[2]) items.push(`📍 Market Alert: ${displayFeed[2].summary_text}`);
+        } else {
+            items.push("📍 Welcome to Nest. The pulse of the market is quiet right now.");
+        }
         return items;
     }, [displayFeed]);
 
     useEffect(() => {
+        if (tickerItems.length === 0) return;
         const interval = setInterval(() => {
             setTickerIndex((prev) => (prev + 1) % tickerItems.length);
-        }, 5000);
+        }, 8000);
         return () => clearInterval(interval);
     }, [tickerItems.length]);
 
@@ -212,16 +213,15 @@ export default function AreaPulsePanel({ currentCenter, currentZoom, className }
     return (
         <div className={clsx(
             "absolute top-24 left-4 w-80 rounded-3xl z-[900] overflow-hidden transition-all duration-500",
-            // CLEAN GLASS STYLE - HIGH OPACITY
-            "bg-white/90 dark:bg-stone-900/90 backdrop-blur-md border border-stone-200 shadow-2xl",
+            // VISIONOS GLASS STYLE
+            "bg-white/70 dark:bg-stone-900/60 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 ring-1 ring-black/5",
             className
         )}>
 
             {/* Top Ticker (Marquee) */}
-            <div className="bg-gradient-to-r from-teal-500/10 to-blue-500/10 px-4 py-2 border-b border-white/20">
-                <div className="flex items-center gap-2 text-[11px] font-bold text-teal-800 dark:text-teal-400 uppercase tracking-wide animate-in fade-in duration-500 key={tickerIndex}">
-                    <TrendingUp size={12} className="text-teal-600" />
-                    <span className="truncate">{tickerItems[tickerIndex]}</span>
+            <div className="bg-gradient-to-r from-teal-500/10 to-blue-500/10 px-4 py-2 border-b border-white/20 overflow-hidden whitespace-nowrap">
+                <div className="inline-block animate-marquee text-[11px] font-bold text-teal-800 dark:text-teal-400 uppercase tracking-wide">
+                    {tickerItems.join("  •  ")}
                 </div>
             </div>
 
@@ -257,7 +257,15 @@ export default function AreaPulsePanel({ currentCenter, currentZoom, className }
                 {/* TAB: LIVE FEED */}
                 {activeTab === 'live' && (
                     <div className="flex flex-col divide-y divide-white/10">
-                        {isLoading && <div className="p-4 text-xs text-gray-400 text-center">Loading pulses...</div>}
+                        {isLoading && <div className="p-8 text-xs text-gray-400 text-center font-medium">Listening to the market...</div>}
+
+                        {!isLoading && displayFeed.length === 0 && (
+                            <div className="p-8 text-center">
+                                <Coffee className="mx-auto h-8 w-8 text-teal-300 mb-2 opacity-50" />
+                                <p className="text-xs text-gray-500 font-medium">Quiet day in Tyneside...</p>
+                                <p className="text-[10px] text-gray-400 mt-1">Be the first to make a move.</p>
+                            </div>
+                        )}
 
                         {!isLoading && displayFeed.map((item) => (
                             <div key={item.event_id} className="flex gap-3 p-4 hover:bg-white/40 dark:hover:bg-black/20 transition-colors cursor-pointer group">

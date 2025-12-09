@@ -6,20 +6,18 @@ import { useState, useCallback, useEffect, useMemo, type ChangeEvent, useRef } f
 import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Edit2, MapPin, Save, X } from 'lucide-react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
-import LayerToggle, { LayerState } from '@/components/Map/LayerToggle'
 import ActivityFeedDrawer from '@/components/Feed/ActivityFeedDrawer'
 import type L from 'leaflet'
 import { uploadHomeStoryImages } from '@/lib/storage'
 import type { MapProperty } from '@/types/models'
 import type { Database } from '../lib/database.types'
 import FloatingControls from '@/components/Map/FloatingControls'
-import MapLegend from '@/components/Map/MapLegend'
 import InboxModal from '@/components/Messaging/InboxModal'
 import { useInbox } from '@/hooks/useInbox'
 import FollowButton from '@/components/Social/FollowButton'
 import { usePropertyFollows } from '@/hooks/usePropertyFollows'
 import FilterModal, { FilterState } from '@/components/UI/FilterModal'
-import AreaInsightsPanel from '@/components/Map/AreaInsightsPanel'
+import AreaPulsePanel from '@/components/Map/AreaPulsePanel'
 import PropertyInsights from '@/components/Shop/PropertyInsights'
 import { useProperties } from '@/hooks/useProperties'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
@@ -58,6 +56,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
   const [followedIds, setFollowedIds] = useState<string[]>(initialFollowedIds)
   const [mapCenter, setMapCenter] = useState<[number, number]>([55.035, -1.470]) // Default to Shiremoor/Monkseaton for Pilot
+  const [mapZoom, setMapZoom] = useState<number>(13)
+  const [showLegend, setShowLegend] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
   const [selectedHome, setSelectedHome] = useState<MapProperty | null>(null)
   const [claimRecord, setClaimRecord] = useState<Database['public']['Tables']['property_claims']['Row'] | null>(null)
@@ -111,6 +111,13 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const lastPendingUserKeyRef = useRef<string | null>(null)
   const { isFollowed, toggleFollow } = usePropertyFollows()
   const [heatmapMode, setHeatmapMode] = useState<'all' | 'market' | 'social' | null>(null)
+
+  interface LayerState {
+    homes: boolean
+    heat: boolean
+    schools: boolean
+    transport: boolean
+  }
 
 
 
@@ -185,8 +192,9 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
   // fetchUserShops is now handled by useProperties hook
 
-  const handleMapMove = useCallback((center: [number, number], bounds: L.LatLngBounds) => {
+  const handleMapMove = useCallback((center: [number, number], zoom: number, bounds: L.LatLngBounds) => {
     setMapCenter(center)
+    setMapZoom(zoom)
     setCurrentBounds((prev) => (prev && prev.equals(bounds) ? prev : bounds))
     fetchUserShops(center, bounds)
   }, [fetchUserShops])
@@ -397,8 +405,9 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       }
       mapMoveTimeoutRef.current = setTimeout(() => {
         const center = mapInstance.getCenter()
+        const zoom = mapInstance.getZoom()
         const bounds = mapInstance.getBounds()
-        handleMapMove([center.lat, center.lng], bounds)
+        handleMapMove([center.lat, center.lng], zoom, bounds)
       }, 250)
     }
 
@@ -1017,7 +1026,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
 
 
-      <LayerToggle layers={layerState} onLayerChange={setLayerState} />
 
       <FloatingControls
         searchQuery={searchQuery}
@@ -1029,11 +1037,42 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         onLogout={handleLogout}
         onOpenInbox={() => setIsInboxOpen(true)}
         onOpenActivity={() => setIsActivityOpen(true)}
-        heatmapMode={heatmapMode}
-        onSetHeatmapMode={setHeatmapMode}
+        layers={layerState}
+        onLayerChange={(newLayers) => {
+          setLayerState(newLayers)
+          // Map heat -> 'all' | null
+          setHeatmapMode(newLayers.heat ? 'all' : null)
+        }}
         onOpenFilters={() => setShowFilters(true)}
         isAdmin={isAdmin}
         onAddHomeClick={() => setIsAddingHome(true)}
+        showLegend={showLegend}
+        onToggleLegend={() => setShowLegend(prev => !prev)}
+        onZoomIn={() => mapRef.current?.zoomIn()}
+        onZoomOut={() => mapRef.current?.zoomOut()}
+        onLocateMe={() => {
+          if ('geolocation' in navigator) {
+            setIsLocating(true)
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                const userLocation: [number, number] = [
+                  position.coords.latitude,
+                  position.coords.longitude
+                ]
+                setMapCenter(userLocation)
+                mapRef.current?.flyTo(userLocation, 16)
+                setIsLocating(false)
+              },
+              (error) => {
+                console.error('Locate failed', error)
+                alert('Could not locate you. Please enable permissions.')
+                setIsLocating(false)
+              }
+            )
+          } else {
+            alert('Geolocation is not supported by your browser.')
+          }
+        }}
       />
       <ActivityFeedDrawer
         userId={currentUser?.id}
@@ -1041,9 +1080,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         onClose={() => setIsActivityOpen(false)}
       />
 
-      <div className="z-40">
-        <MapLegend />
-      </div>
+
 
 
 
@@ -1063,16 +1100,13 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
       {/* Area Insights Panel */}
       {
-        isListOpen && (
-          <div className="absolute top-24 left-4 bottom-24 w-80 z-[60] pointer-events-none flex flex-col animate-in slide-in-from-left-4 duration-300">
-            {/* Pointer events auto is handled inside the component */}
-            <AreaInsightsPanel
-              properties={activeShops}
-              onSelectProperty={handleShopClick}
-              currentUser={currentUser}
-            />
-          </div>
-        )
+        <div className="absolute top-24 left-4 bottom-24 w-80 z-[60] pointer-events-none flex flex-col">
+          <AreaPulsePanel
+            currentCenter={mapCenter}
+            currentZoom={mapZoom}
+            className="pointer-events-auto"
+          />
+        </div>
       }
 
 

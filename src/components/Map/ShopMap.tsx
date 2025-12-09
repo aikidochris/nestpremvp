@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, Marker, Popup, TileLayer, useMap, ZoomControl, useMapEvents } from 'react-leaflet'
+import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
@@ -158,7 +158,7 @@ export default function ShopMap({
         lat: newPropertyLoc.lat,
         lon: newPropertyLoc.lng,
         address_data: newPropertyData
-      })
+      } as any)
 
       if (error) throw error
 
@@ -517,24 +517,30 @@ export default function ShopMap({
     const isOpen = merged.signals?.soft_listing ?? merged.is_open_to_talking
     const isClaimed = merged.is_claimed
 
+    // TRAFFIC LIGHT SYSTEM
     if (isSale) {
-      const icon = createSolidIcon('#E65F52', 20, isOwner)
+      // RED: #F43F5E (rose-500)
+      const icon = createSolidIcon('#F43F5E', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isRent) {
-      const icon = createSolidIcon('#6366F1', 20, isOwner)
+      // BLUE: #3B82F6 (blue-500)
+      const icon = createSolidIcon('#3B82F6', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isOpen) {
-      const icon = createSolidIcon('#007C7C', 20, isOwner)
+      // TEAL: #14B8A6 (teal-500)
+      const icon = createSolidIcon('#14B8A6', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 500 }
     }
     if (isClaimed) {
-      const icon = createSolidIcon('#475569', 18, isOwner)
+      // AMBER/GOLD: #FBBF24 (amber-400) - High vis against map
+      const icon = createSolidIcon('#FBBF24', 18, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 400 }
     }
 
-    const icon = createRingIcon('#CBD5E1', 12)
+    // Default: Slate-400
+    const icon = createRingIcon('#94A3B8', 12)
     return { icon, zIndexOffset: 0 }
   }
 
@@ -715,7 +721,7 @@ export default function ShopMap({
             onSetIsAddingHome?.(false)
           }}
         />
-        <ZoomControl position="bottomright" />
+
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors & Carto'
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"

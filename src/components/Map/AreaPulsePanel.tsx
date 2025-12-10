@@ -147,8 +147,8 @@ export default function AreaPulsePanel({ currentCenter, currentZoom, className, 
     return (
         <div className={clsx(
             "fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] max-w-lg z-[900] transition-all duration-500 ease-in-out font-sans",
-            // VISIONOS GLASS STYLE - 80% opacity for better readibility on the sheet
-            "bg-white/80 dark:bg-stone-900/80 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 ring-1 ring-black/5 rounded-2xl overflow-hidden",
+            // VISIONOS GLASS STYLE - 40% opacity for consistent glass aesthetic
+            "bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 ring-1 ring-black/5 rounded-2xl overflow-hidden",
             className
         )}>
             {/* COLLAPSED HEADER (Always Visible) */}

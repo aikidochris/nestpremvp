@@ -89,6 +89,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const [adminEditData, setAdminEditData] = useState<any>(null)
   const [adminSaving, setAdminSaving] = useState(false)
 
+  // Hero Image State (Progressive Delight)
+  const [heroImage, setHeroImage] = useState<string | null>(null)
+  const [heroUploading, setHeroUploading] = useState(false)
+  const heroFileInputRef = useRef<HTMLInputElement | null>(null)
+
 
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
   const [messageModalMode, setMessageModalMode] = useState<MessageMode | undefined>(undefined)
@@ -502,6 +507,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
     if (!latestError) {
       setClaimRecord(latest ?? null)
+      // Immediately update selectedHome so hero transitions to "Add a photo"
+      setSelectedHome(prev => prev ? { ...prev, is_claimed: true, claimed_by_user_id: currentUser.id } : prev)
+      // Also update in the shops array for map consistency
+      setShops(prev => prev.map(p => p.id === selectedHome.id ? { ...p, is_claimed: true, claimed_by_user_id: currentUser.id } : p))
     }
   }
 
@@ -834,6 +843,74 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     setIntentForId(selectedHome.id)
   }, [selectedHome?.id])
 
+  // Fetch hero image from home_story when selectedHome changes
+  useEffect(() => {
+    if (!selectedHome?.id) {
+      setHeroImage(null)
+      return
+    }
+
+    let cancelled = false
+    const fetchHeroImage = async () => {
+      const { data, error } = await supabase
+        .from('home_story')
+        .select('images')
+        .eq('property_id', selectedHome.id)
+        .maybeSingle()
+
+      if (cancelled) return
+      if (error) {
+        console.error('Error fetching hero image', error)
+        setHeroImage(null)
+        return
+      }
+
+      const images = data?.images as string[] | null
+      setHeroImage(images && images.length > 0 ? images[0] : null)
+    }
+
+    fetchHeroImage()
+    return () => { cancelled = true }
+  }, [selectedHome?.id, supabase])
+
+  // Handle hero image upload (Direct Action)
+  const handleHeroUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length || !selectedHome || !currentUser) return
+    setHeroUploading(true)
+
+    try {
+      const files = Array.from(e.target.files)
+      const urls = await uploadHomeStoryImages(supabase, selectedHome.id, files)
+
+      // Upsert to home_story
+      const { data: existing } = await supabase
+        .from('home_story')
+        .select('images')
+        .eq('property_id', selectedHome.id)
+        .maybeSingle()
+
+      const existingImages = (existing?.images as string[]) || []
+      const newImages = [...existingImages, ...urls]
+
+      await supabase
+        .from('home_story')
+        .upsert({
+          property_id: selectedHome.id,
+          user_id: currentUser.id,
+          images: newImages,
+          summary_text: ''
+        }, { onConflict: 'property_id' })
+
+      setHeroImage(newImages[0])
+    } catch (error) {
+      console.error('Hero upload failed:', error)
+      alert('Failed to upload photo')
+    } finally {
+      setHeroUploading(false)
+      if (heroFileInputRef.current) heroFileInputRef.current.value = ''
+    }
+  }
+
   useEffect(() => {
     setIsMessageModalOpen(false)
     setMessageModalMode(undefined)
@@ -1122,7 +1199,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       {
         selectedHome && (
           <div
-            className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/95 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[60] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
+            className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/40 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[1050] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
           >
             {/* Hero */}
             <div className="relative h-64 w-full bg-slate-100 group">
@@ -1175,12 +1252,77 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                 </div>
               )}
 
-              {/* Hero Image Section - Removed in favor of HomeStorySection gallery for now
-                  If needed, we can re-add a read-only hero image from selectedHome or HomeStory
-              */}
-              <div className="w-full bg-slate-100">
-                {/* Placeholder for potential hero image or just relying on StorySection below */}
-              </div>
+              {/* Progressive Delight Hero Image */}
+              {(() => {
+                const hasPhoto = heroImage || (selectedHome as any)?.image_url
+                const isClaimed = selectedHome?.is_claimed
+                const canUpload = isClaimedByYou
+
+                // Hidden file input for direct upload
+                const fileInput = canUpload && (
+                  <input
+                    ref={heroFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleHeroUpload}
+                  />
+                )
+
+                // State 3: Showcase (Has Photo)
+                if (hasPhoto) {
+                  return (
+                    <>
+                      {fileInput}
+                      <img
+                        src={heroImage || (selectedHome as any)?.image_url}
+                        className={`w-full h-full object-cover ${canUpload ? 'cursor-pointer' : ''}`}
+                        alt="Home"
+                        onClick={() => canUpload && heroFileInputRef.current?.click()}
+                      />
+                      {heroUploading && (
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                          <span className="text-white font-medium">Uploading...</span>
+                        </div>
+                      )}
+                    </>
+                  )
+                }
+
+                // State 2: Vibe Gradient (Claimed, No Photo)
+                if (isClaimed) {
+                  const postcode = selectedHome?.postcode || ''
+                  const gradientClass = postcode.startsWith('NE26') || postcode.startsWith('NE30')
+                    ? 'bg-gradient-to-br from-teal-400 to-blue-500'
+                    : postcode.startsWith('NE28') || postcode.startsWith('NE29')
+                      ? 'bg-gradient-to-br from-slate-400 to-slate-600'
+                      : 'bg-gradient-to-br from-emerald-400 to-teal-500'
+
+                  return (
+                    <>
+                      {fileInput}
+                      <div
+                        className={`w-full h-full flex flex-col items-center justify-center ${gradientClass} ${canUpload ? 'cursor-pointer' : ''}`}
+                        onClick={() => canUpload && heroFileInputRef.current?.click()}
+                      >
+                        <Camera className="text-white/70" size={36} />
+                        <span className="text-white/90 text-sm mt-2 font-semibold">
+                          {heroUploading ? 'Uploading...' : 'Add a photo'}
+                        </span>
+                      </div>
+                    </>
+                  )
+                }
+
+                // State 1: Ghost Map (Unclaimed)
+                return (
+                  <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex flex-col items-center justify-center">
+                    <MapPin className="text-slate-400" size={32} />
+                    <span className="text-slate-500 text-sm mt-2 font-medium">Claim this home to add photos</span>
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Content */}

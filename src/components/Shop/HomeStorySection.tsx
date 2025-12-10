@@ -114,7 +114,7 @@ export default function HomeStorySection({ selectedHome, currentUser, isClaimedB
         let uploadedUrls: string[] = []
         if (newUploads.length > 0) {
             try {
-                uploadedUrls = await uploadHomeStoryImages(newUploads.map(u => u.file), selectedHome.id)
+                uploadedUrls = await uploadHomeStoryImages(supabase, selectedHome.id, newUploads.map(u => u.file))
             } catch (e) {
                 console.error('Upload failed:', e)
                 alert('Failed to upload images')
@@ -135,7 +135,7 @@ export default function HomeStorySection({ selectedHome, currentUser, isClaimedB
 
         const { error } = await supabase
             .from('home_story')
-            .upsert(payload as any) // Type might be slightly off with generated types
+            .upsert(payload as any, { onConflict: 'property_id' })
 
         if (error) {
             alert('Failed to save story: ' + error.message)

@@ -166,13 +166,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "property_public_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "follows_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "property_public_view"
             referencedColumns: ["property_id"]
           },
         ]
@@ -222,13 +215,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "property_public_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "home_comments_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "property_public_view"
             referencedColumns: ["property_id"]
           },
         ]
@@ -264,13 +250,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: true
             referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "home_story_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: true
-            referencedRelation: "property_public_view"
             referencedColumns: ["id"]
           },
           {
@@ -316,13 +295,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: true
             referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "intent_flags_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: true
-            referencedRelation: "property_public_view"
             referencedColumns: ["id"]
           },
           {
@@ -381,13 +353,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "property_public_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "messages_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "property_public_view"
             referencedColumns: ["property_id"]
           },
         ]
@@ -429,13 +394,6 @@ export type Database = {
             columns: ["resource_id"]
             isOneToOne: false
             referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notifications_resource_id_fkey"
-            columns: ["resource_id"]
-            isOneToOne: false
-            referencedRelation: "property_public_view"
             referencedColumns: ["id"]
           },
           {
@@ -641,13 +599,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "property_public_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "property_claims_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "property_public_view"
             referencedColumns: ["property_id"]
           },
         ]
@@ -680,13 +631,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "property_inbox_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "property_public_view"
             referencedColumns: ["id"]
           },
           {
@@ -750,13 +694,6 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "service_intents_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "property_public_view"
             referencedColumns: ["id"]
           },
           {
@@ -839,12 +776,18 @@ export type Database = {
       property_public_view: {
         Row: {
           claimed_by_user_id: string | null
+          display_label: string | null
+          energy_rating: string | null
+          epc_floor_area: number | null
+          epc_property_type: string | null
+          has_recent_activity: boolean | null
           house_number: string | null
-          id: string | null
           is_claimed: boolean | null
           is_for_rent: boolean | null
           is_for_sale: boolean | null
           is_open_to_talking: boolean | null
+          last_sale_date: string | null
+          last_sale_price: number | null
           lat: number | null
           lon: number | null
           postcode: string | null

@@ -200,12 +200,12 @@ export default function FloatingControls({
 
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-50 overflow-hidden">
+    <div className="pointer-events-none absolute inset-0 z-[1000] overflow-hidden">
 
       {/* 1. TOP CENTER SEARCH PILL - GLASSMORPHISM */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-[1000] pointer-events-auto">
         <div className="relative">
-          <div className="flex items-center gap-3 w-full bg-white/90 backdrop-blur-xl shadow-2xl rounded-full px-4 py-3 border border-white/50 transition-shadow focus-within:ring-2 focus-within:ring-white/50 ring-1 ring-black/5">
+          <div className="flex items-center gap-3 w-full bg-white/95 backdrop-blur-md shadow-xl rounded-full px-4 py-3 border border-white/50 transition-shadow focus-within:ring-2 focus-within:ring-white/50 ring-1 ring-black/5">
             {onToggleList && (
               <button
                 type="button"
@@ -224,7 +224,7 @@ export default function FloatingControls({
               onKeyDown={handleKeyDown}
               ref={inputRef}
               placeholder="Search by street, postcode..."
-              className="flex-1 bg-transparent border-none outline-none text-base text-slate-900 placeholder:text-slate-400 h-6 font-medium tracking-tight"
+              className="flex-1 bg-transparent border-none outline-none text-base text-slate-800 placeholder:text-slate-400 h-6 font-medium tracking-tight"
             />
             {/* Divider */}
             <div className="w-px h-5 bg-slate-200 mx-1"></div>
@@ -369,97 +369,84 @@ export default function FloatingControls({
       {/* 3. BOTTOM RIGHT TOOL STACK - GLASSMORPHISM */}
       <div className="absolute bottom-24 right-4 flex flex-col gap-3 z-[900] pointer-events-auto items-end">
 
-        {/* Layer Menu Popover (Glass Card) */}
+        {/* Layer Menu Popover (Compact, Left of Button) */}
         {showLayerMenu && layers && (
-          <div className="mr-2 mb-0 p-5 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/50 shadow-2xl w-56 animate-in fade-in slide-in-from-right-4 duration-300 ring-1 ring-black/5">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Layers</h4>
-              <button onClick={() => setShowLayerMenu(false)} className="text-slate-400 hover:text-slate-600"><Minus size={14} /></button>
-            </div>
+          <div className="absolute right-14 bottom-24 p-2 rounded-2xl bg-white/95 backdrop-blur-md border border-white/50 shadow-xl w-48 animate-in fade-in slide-in-from-right-2 duration-200 ring-1 ring-black/5 flex flex-col gap-1">
+            {/* Buzz */}
+            <button
+              onClick={() => handleToggleLayer('heat')}
+              className={`flex items-center justify-between w-full p-2 rounded-xl transition-all ${layers.heat ? "bg-purple-50 text-purple-900" : "hover:bg-slate-50 text-slate-600"}`}
+            >
+              <div className="flex items-center gap-2">
+                <Flame size={16} className={layers.heat ? "text-purple-600" : "text-slate-400"} />
+                <span className="text-sm font-bold">Buzz</span>
+              </div>
+              {layers.heat && <div className="h-2 w-2 rounded-full bg-purple-500" />}
+            </button>
 
-            <div className="space-y-1">
-              {/* Buzz / Heat */}
-              <button
-                onClick={() => handleToggleLayer('heat')}
-                className={`flex items-center justify-between w-full p-3 rounded-2xl transition-all ${layers.heat ? "bg-purple-50 border border-purple-100" : "hover:bg-white/50 border border-transparent"}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-1.5 rounded-full ${layers.heat ? "bg-purple-100 text-purple-600" : "bg-slate-100 text-slate-400"}`}>
-                    <Flame size={16} />
-                  </div>
-                  <span className={`text-sm font-bold ${layers.heat ? "text-purple-900" : "text-slate-500"}`}>Buzz</span>
-                </div>
-                {layers.heat && <div className="h-2 w-2 rounded-full bg-purple-500 shadow-lg shadow-purple-500/50" />}
-              </button>
+            {/* Schools */}
+            <button
+              onClick={() => handleToggleLayer('schools')}
+              className={`flex items-center justify-between w-full p-2 rounded-xl transition-all ${layers.schools ? "bg-blue-50 text-blue-900" : "hover:bg-slate-50 text-slate-600"}`}
+            >
+              <div className="flex items-center gap-2">
+                <GraduationCap size={16} className={layers.schools ? "text-blue-600" : "text-slate-400"} />
+                <span className="text-sm font-bold">Schools</span>
+              </div>
+              {layers.schools && <div className="h-2 w-2 rounded-full bg-blue-500" />}
+            </button>
 
-              {/* Schools */}
-              <button
-                onClick={() => handleToggleLayer('schools')}
-                className={`flex items-center justify-between w-full p-3 rounded-2xl transition-all ${layers.schools ? "bg-blue-50 border border-blue-100" : "hover:bg-white/50 border border-transparent"}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-1.5 rounded-full ${layers.schools ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400"}`}>
-                    <GraduationCap size={16} />
-                  </div>
-                  <span className={`text-sm font-bold ${layers.schools ? "text-blue-900" : "text-slate-500"}`}>Schools</span>
-                </div>
-                {layers.schools && <div className="h-2 w-2 rounded-full bg-blue-500 shadow-lg shadow-blue-500/50" />}
-              </button>
+            {/* Transport */}
+            <button
+              onClick={() => handleToggleLayer('transport')}
+              className={`flex items-center justify-between w-full p-2 rounded-xl transition-all ${layers.transport ? "bg-emerald-50 text-emerald-900" : "hover:bg-slate-50 text-slate-600"}`}
+            >
+              <div className="flex items-center gap-2">
+                <TrainFront size={16} className={layers.transport ? "text-emerald-600" : "text-slate-400"} />
+                <span className="text-sm font-bold">Transport</span>
+              </div>
+              {layers.transport && <div className="h-2 w-2 rounded-full bg-emerald-500" />}
+            </button>
 
-              {/* Transport */}
-              <button
-                onClick={() => handleToggleLayer('transport')}
-                className={`flex items-center justify-between w-full p-3 rounded-2xl transition-all ${layers.transport ? "bg-emerald-50 border border-emerald-100" : "hover:bg-white/50 border border-transparent"}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-1.5 rounded-full ${layers.transport ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
-                    <TrainFront size={16} />
-                  </div>
-                  <span className={`text-sm font-bold ${layers.transport ? "text-emerald-900" : "text-slate-500"}`}>Transport</span>
-                </div>
-                {layers.transport && <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-lg shadow-emerald-500/50" />}
-              </button>
-
-              {/* Satellite (Disabled) */}
-              <button
-                disabled
-                className="flex items-center justify-between w-full p-3 rounded-2xl opacity-50 cursor-not-allowed"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-1.5 rounded-full bg-slate-50 text-slate-300">
-                    <Satellite size={16} />
-                  </div>
-                  <span className="text-sm font-bold text-slate-400">Satellite</span>
-                </div>
-              </button>
-            </div>
+            {/* Satellite (Disabled) */}
+            <button
+              disabled
+              className="flex items-center justify-between w-full p-2 rounded-xl opacity-50 cursor-not-allowed"
+            >
+              <div className="flex items-center gap-2">
+                <Satellite size={16} className="text-slate-300" />
+                <span className="text-sm font-bold text-slate-400">Satellite (Soon)</span>
+              </div>
+            </button>
           </div>
         )}
 
-
         {/* Legend Card (Slide-out) */}
         {showLegend && (
-          <div className="mr-2 mb-0 p-5 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/50 shadow-2xl w-64 animate-in fade-in slide-in-from-right-4 duration-300 ring-1 ring-black/5">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Legend</h4>
-              <button onClick={onToggleLegend} className="text-slate-400 hover:text-slate-600"><Minus size={14} /></button>
+          <div className="absolute right-14 bottom-14 p-4 rounded-3xl bg-white/95 backdrop-blur-md border border-white/50 shadow-2xl w-56 animate-in fade-in slide-in-from-right-4 duration-300 ring-1 ring-black/5">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Signal Guide</h4>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <div className="flex items-center gap-3">
-                <div className="w-4 h-4 rounded-full bg-teal-500 shadow-lg shadow-teal-500/30 border-2 border-white"></div>
-                <span className="text-sm font-bold text-slate-700">Open to Talking</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-teal-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">Open to Talking</span>
               </div>
               <div className="flex items-center gap-3">
-                <div className="w-4 h-4 rounded-full bg-blue-500 shadow-lg shadow-blue-500/30 border-2 border-white"></div>
-                <span className="text-sm font-bold text-slate-700">For Rent</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-rose-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">For Sale</span>
               </div>
               <div className="flex items-center gap-3">
-                <div className="w-4 h-4 rounded-full bg-rose-500 shadow-lg shadow-rose-500/30 border-2 border-white"></div>
-                <span className="text-sm font-bold text-slate-700">For Sale</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">For Rent</span>
               </div>
               <div className="flex items-center gap-3">
-                <div className="w-4 h-4 rounded-full bg-amber-400 shadow-lg shadow-amber-400/30 border-2 border-white"></div>
-                <span className="text-sm font-bold text-slate-700">Claimed</span>
+                <div className="w-3.5 h-3.5 rounded-full bg-slate-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">Claimed</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3.5 h-3.5 rounded-full bg-white shadow-sm border border-slate-300"></div>
+                <span className="text-xs font-bold text-slate-700">Unclaimed</span>
               </div>
             </div>
           </div>
@@ -469,10 +456,13 @@ export default function FloatingControls({
 
         {/* Layer Menu Toggle */}
         <button
-          onClick={() => setShowLayerMenu(prev => !prev)}
+          onClick={() => {
+            setShowLayerMenu(prev => !prev);
+            if (showLegend) onToggleLegend?.(); // Auto close legend if layers open
+          }}
           className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl border border-white/50 ${showLayerMenu
-            ? "bg-slate-900 text-white shadow-slate-900/20"
-            : "bg-white/90 backdrop-blur-md text-slate-700 hover:bg-white hover:scale-105"
+            ? "bg-slate-800 text-white"
+            : "bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 hover:scale-105"
             }`}
           title="Layers"
         >
@@ -481,10 +471,13 @@ export default function FloatingControls({
 
         {/* Info / Legend */}
         <button
-          onClick={onToggleLegend}
+          onClick={() => {
+            onToggleLegend?.();
+            setShowLayerMenu(false); // Auto close layers if legend open
+          }}
           className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl border border-white/50 ${showLegend
-            ? "bg-teal-600 text-white shadow-teal-600/20"
-            : "bg-white/90 backdrop-blur-md text-slate-700 hover:bg-white hover:scale-105"
+            ? "bg-slate-800 text-white"
+            : "bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 hover:scale-105"
             }`}
           title="Legend"
         >
@@ -495,7 +488,7 @@ export default function FloatingControls({
         {onLocateMe && (
           <button
             onClick={onLocateMe}
-            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/90 backdrop-blur-md text-slate-700 shadow-xl border border-white/50 hover:bg-white hover:scale-105 transition-all"
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 shadow-xl border border-white/50 hover:scale-105 transition-all"
             title="Locate Me"
           >
             <Locate size={20} />
@@ -505,7 +498,7 @@ export default function FloatingControls({
         {/* Zoom In */}
         <button
           onClick={onZoomIn}
-          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/90 backdrop-blur-md text-slate-700 shadow-xl border border-white/50 hover:bg-white hover:scale-105 transition-all"
+          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 shadow-xl border border-white/50 hover:scale-105 transition-all"
           title="Zoom In"
         >
           <Plus size={20} />
@@ -514,7 +507,7 @@ export default function FloatingControls({
         {/* Zoom Out */}
         <button
           onClick={onZoomOut}
-          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/90 backdrop-blur-md text-slate-700 shadow-xl border border-white/50 hover:bg-white hover:scale-105 transition-all"
+          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 shadow-xl border border-white/50 hover:scale-105 transition-all"
           title="Zoom Out"
         >
           <Minus size={20} />

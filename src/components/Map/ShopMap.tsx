@@ -465,12 +465,12 @@ export default function ShopMap({
     fetchForBounds()
   }, [fetchForBounds, map, refreshSignal])
 
-  const createSolidIcon = (color: string, size: number, isOwner: boolean) => {
+  const createSolidIcon = (color: string, size: number, isOwner: boolean, borderColor: string = '#fff') => {
     const borderWidth = isOwner ? 4 : 2
     const ring = isOwner ? 'box-shadow:0 0 0 2px rgba(0,0,0,0.1);' : ''
     return L.divIcon({
       html: `
-        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid #fff;${ring}background:${color};border-radius:9999px;" aria-hidden="true"></div>
+        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid ${borderColor};${ring}background:${color};border-radius:9999px;" aria-hidden="true"></div>
       `,
       className: 'nest-pin',
       iconSize: [size, size],
@@ -524,8 +524,8 @@ export default function ShopMap({
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isRent) {
-      // BLUE: #3B82F6 (blue-500)
-      const icon = createSolidIcon('#3B82F6', 20, isOwner)
+      // PURPLE/INDIGO: #6366F1 (indigo-500)
+      const icon = createSolidIcon('#6366F1', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isOpen) {
@@ -534,13 +534,13 @@ export default function ShopMap({
       return { icon, zIndexOffset: isOwner ? 1000 : 500 }
     }
     if (isClaimed) {
-      // AMBER/GOLD: #FBBF24 (amber-400) - High vis against map
-      const icon = createSolidIcon('#FBBF24', 18, isOwner)
+      // GREY: #64748B (slate-500)
+      const icon = createSolidIcon('#64748B', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 400 }
     }
 
-    // Default: Slate-400
-    const icon = createRingIcon('#94A3B8', 12)
+    // Unclaimed: White (Solid White with Slate Border for visibility)
+    const icon = createSolidIcon('#FFFFFF', 12, isOwner, '#CBD5E1') // slate-300 border
     return { icon, zIndexOffset: 0 }
   }
 

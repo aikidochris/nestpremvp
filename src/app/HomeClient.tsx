@@ -23,6 +23,7 @@ import { useProperties } from '@/hooks/useProperties'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
 import HomeStorySection from '@/components/Shop/HomeStorySection'
 import MessageModal from '@/components/Messaging/MessageModal'
+import FlagModal from '@/components/UI/FlagModal'
 
 
 
@@ -97,6 +98,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
   const [messageModalMode, setMessageModalMode] = useState<MessageMode | undefined>(undefined)
+  const [isFlagModalOpen, setIsFlagModalOpen] = useState(false)
 
   // Message state moved to MessageModal, we just track open state here
 
@@ -1536,10 +1538,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
               <div className="mt-8 text-center">
                 <button
-                  onClick={() => {
-                    alert('Thanks for flagging. Our team will review this home.')
-                  }}
-                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                  onClick={() => setIsFlagModalOpen(true)}
+                  className="text-xs text-slate-400 hover:text-rose-500 underline cursor-pointer"
                 >
                   Flag this home
                 </button>
@@ -1572,6 +1572,15 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           selectedHome={selectedHome}
           currentUser={currentUser}
           intentFlags={computeIntentFlags()}
+        />
+      )}
+
+      {selectedHome && (
+        <FlagModal
+          isOpen={isFlagModalOpen}
+          onClose={() => setIsFlagModalOpen(false)}
+          propertyId={selectedHome.id}
+          userId={currentUser?.id}
         />
       )}
     </div>

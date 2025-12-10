@@ -863,13 +863,13 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       if (existing) return existing
 
       const { data, error } = await supabase
-        .from('properties_public_view')
+        .from('property_public_view')
         .select('*')
         .eq('id', propertyId)
         .single()
 
       if (error) {
-        console.error('Deep link supabase error', error)
+        console.error('Deep link supabase error', JSON.stringify(error, null, 2))
         return null
       }
 

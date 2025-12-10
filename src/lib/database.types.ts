@@ -1096,7 +1096,26 @@ export type Database = {
         Returns: boolean
       }
       geomfromewkt: { Args: { "": string }; Returns: unknown }
-      get_activity_feed: { Args: { p_user_id: string }; Returns: Json[] }
+      get_activity_feed: {
+        Args: {
+          p_lat?: number
+          p_lon?: number
+          p_radius_meters?: number
+          p_user_id: string
+        }
+        Returns: {
+          created_at: string
+          event_id: string
+          house_number: string
+          lat: number
+          lon: number
+          market_image_url: string
+          property_id: string
+          street: string
+          summary_text: string
+          type: string
+        }[]
+      }
       get_admin_export_data: { Args: { export_type: string }; Returns: Json }
       get_admin_stats: { Args: never; Returns: Json }
       get_heatmap_points: {

@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
-import { Activity, MapPin, TrendingUp, Anchor, Coffee, GraduationCap, ArrowRight, Home, Castle, Palette, Umbrella, Trees, Fish, Train, Sprout, Ship } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Activity, MapPin, TrendingUp, Anchor, Coffee, GraduationCap, ArrowRight, Home, Castle, Palette, Umbrella, Trees, Fish, Train, Sprout, Ship, ChevronUp, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import { useActivityFeed } from "@/hooks/useActivityFeed";
+import { VIBE_ZONES, VibeZone } from "@/data/vibeZones";
+import { AnimatePresence, motion } from "framer-motion";
 
 interface AreaPulsePanelProps {
     currentCenter?: [number, number]; // Lat, Lon
@@ -9,9 +11,7 @@ interface AreaPulsePanelProps {
     className?: string; // For mobile toggle visibility
 }
 
-// --- Vibe Data Engine ---
-import { VIBE_ZONES, VibeZone } from "@/data/vibeZones";
-
+// --- Constants ---
 const DEFAULT_VIBE: VibeZone = {
     id: "north-tyneside",
     name: "North Tyneside",
@@ -23,10 +23,17 @@ const DEFAULT_VIBE: VibeZone = {
     description: "Welcome to Nest. Pan around to discover the unique vibes of each neighborhood."
 };
 
-// Simple distance function (degrees) - approx 1km is roughly 0.009 deg lat, 0.015 deg lon
-// We'll use a threshold of 0.015 degrees (approx 1.5km) for "near"
 const NEAR_THRESHOLD = 0.015;
 
+interface AreaPulsePanelProps {
+    currentCenter?: [number, number]; // Lat, Lon
+    currentZoom?: number;
+    className?: string; // For mobile toggle visibility
+    onLocationSelect?: (lat: number, lon: number) => void;
+}
+
+// ... helper functions omitted for brevity, they remain the same ...
+// Simple distance function (degrees)
 function getAreaVibe(lat: number, lon: number): VibeZone {
     let closest = null;
     let minDist = Infinity;
@@ -47,6 +54,7 @@ function getAreaVibe(lat: number, lon: number): VibeZone {
     }
     return DEFAULT_VIBE;
 }
+
 
 // Tag Icon Helper
 const getTagIcon = (tag: string) => {
@@ -84,17 +92,19 @@ const getTagColor = (tag: string) => {
     return "stone";
 }
 
-// Icon helper
-function UsersIcon(props: any) {
-    return <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-}
 
-
-export default function AreaPulsePanel({ currentCenter, currentZoom, className }: AreaPulsePanelProps) {
+export default function AreaPulsePanel({ currentCenter, currentZoom, className, onLocationSelect }: AreaPulsePanelProps) {
+    const [isExpanded, setIsExpanded] = useState(false);
     const [activeTab, setActiveTab] = useState<'live' | 'vibe'>('live');
-    const [tickerIndex, setTickerIndex] = useState(0);
-    const { feedItems, isLoading } = useActivityFeed(null); // Global feed
-    // Real Feed without Mock Fillers
+    const [tickerState, setTickerState] = useState<'feed' | 'vibe'>('feed');
+
+    // Prepare location for hook (stable object)
+    const feedLocation = useMemo(() => {
+        if (!currentCenter) return null;
+        return { lat: currentCenter[0], lon: currentCenter[1], radius: 5000 };
+    }, [currentCenter]);
+
+    const { feedItems, isLoading } = useActivityFeed(null, feedLocation); // Local feed
     const displayFeed = (!isLoading && feedItems) ? feedItems : [];
 
     // Determine current Vibe based on center
@@ -103,195 +113,253 @@ export default function AreaPulsePanel({ currentCenter, currentZoom, className }
         return getAreaVibe(currentCenter[0], currentCenter[1]);
     }, [currentCenter]);
 
-    // Ticker Logic
-    const tickerItems = useMemo(() => {
-        const items = [];
-        if (displayFeed.length > 0) {
-            items.push(`🔥 Live: ${displayFeed[0].summary_text}`);
-            if (displayFeed[1]) items.push(`📢 ${displayFeed[1].summary_text}`);
-            if (displayFeed[2]) items.push(`📍 Market Alert: ${displayFeed[2].summary_text}`);
-        } else {
-            items.push("📍 Welcome to Nest. The pulse of the market is quiet right now.");
-        }
-        return items;
-    }, [displayFeed]);
-
+    // Ticker Rotation Logic
     useEffect(() => {
-        if (tickerItems.length === 0) return;
+        if (isExpanded) return;
         const interval = setInterval(() => {
-            setTickerIndex((prev) => (prev + 1) % tickerItems.length);
-        }, 8000);
+            setTickerState(prev => prev === 'feed' ? 'vibe' : 'feed');
+        }, 5000);
         return () => clearInterval(interval);
-    }, [tickerItems.length]);
+    }, [isExpanded]);
 
+    // Construct Ticker Text
+    const tickerText = useMemo(() => {
+        if (tickerState === 'feed') {
+            if (displayFeed.length > 0) {
+                return `📡 ${displayFeed[0].summary_text}`;
+            }
+            return "📡 Quiet day in the neighborhood...";
+        } else {
+            return `📍 ${currentVibe.name} — ${currentVibe.punchline}`;
+        }
+    }, [tickerState, displayFeed, currentVibe]);
 
-    // Auto-switch to Vibe tab if zoomed out or user drags to a new zone?
-    // For now, let's keep it manual to avoid annoyance.
+    // Toggle Expansion
+    const toggleExpand = () => setIsExpanded(!isExpanded);
+
+    const handleFeedItemClick = (item: any) => {
+        if (onLocationSelect && item.lat && item.lon) {
+            onLocationSelect(item.lat, item.lon);
+            // Optional: Close panel or give feedback?
+        }
+    }
 
     return (
         <div className={clsx(
-            "absolute top-24 left-4 w-80 rounded-3xl z-[900] overflow-hidden transition-all duration-500",
-            // VISIONOS GLASS STYLE
-            "bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 ring-1 ring-black/5",
+            "fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] max-w-lg z-[900] transition-all duration-500 ease-in-out font-sans",
+            // VISIONOS GLASS STYLE - 80% opacity for better readibility on the sheet
+            "bg-white/80 dark:bg-stone-900/80 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 ring-1 ring-black/5 rounded-2xl overflow-hidden",
             className
         )}>
+            {/* COLLAPSED HEADER (Always Visible) */}
+            <div
+                onClick={toggleExpand}
+                className="h-12 flex items-center justify-between px-4 cursor-pointer hover:bg-white/20 active:bg-white/30 transition-colors"
+            >
+                <div className="flex-1 flex items-center gap-2 overflow-hidden">
+                    {/* Animated Ticker Text */}
+                    <AnimatePresence mode="wait">
+                        <motion.span
+                            key={tickerState}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            transition={{ duration: 0.3 }}
+                            className="text-sm font-semibold text-slate-800 dark:text-gray-100 truncate"
+                        >
+                            {tickerText}
+                        </motion.span>
+                    </AnimatePresence>
+                </div>
 
-            {/* Top Ticker (Marquee) */}
-            <div className="bg-gradient-to-r from-teal-500/10 to-blue-500/10 px-4 py-2 border-b border-white/20 overflow-hidden whitespace-nowrap">
-                <div className="inline-block animate-marquee text-[11px] font-bold text-teal-800 dark:text-teal-400 uppercase tracking-wide">
-                    {tickerItems.join("  •  ")}
+                {/* Chevron */}
+                <div className="text-slate-500 dark:text-slate-400">
+                    {isExpanded ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
                 </div>
             </div>
 
-            {/* Tab Switcher */}
-            <div className="flex p-1 gap-1 border-b border-white/20 bg-white/10">
-                <button
-                    onClick={() => setActiveTab('live')}
-                    className={clsx(
-                        "flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 flex items-center justify-center gap-2",
-                        activeTab === 'live'
-                            ? "bg-white/80 dark:bg-black/50 shadow-sm text-gray-900 dark:text-white"
-                            : "text-gray-500 dark:text-gray-400 hover:bg-white/30 hover:text-gray-900"
-                    )}
-                >
-                    <Activity size={14} /> Live Feed
-                </button>
-                <button
-                    onClick={() => setActiveTab('vibe')}
-                    className={clsx(
-                        "flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 flex items-center justify-center gap-2",
-                        activeTab === 'vibe'
-                            ? "bg-white/80 dark:bg-black/50 shadow-sm text-gray-900 dark:text-white"
-                            : "text-gray-500 dark:text-gray-400 hover:bg-white/30 hover:text-gray-900"
-                    )}
-                >
-                    <MapPin size={14} /> Area Vibe
-                </button>
-            </div>
-
-            {/* Content Area */}
-            <div className="max-h-[60vh] overflow-y-auto scrollbar-hide p-0 relative">
-
-                {/* TAB: LIVE FEED */}
-                {activeTab === 'live' && (
-                    <div className="flex flex-col divide-y divide-white/10">
-                        {isLoading && <div className="p-8 text-xs text-gray-400 text-center font-medium">Listening to the market...</div>}
-
-                        {!isLoading && displayFeed.length === 0 && (
-                            <div className="p-8 text-center">
-                                <Coffee className="mx-auto h-8 w-8 text-teal-300 mb-2 opacity-50" />
-                                <p className="text-xs text-gray-500 font-medium">Quiet day in Tyneside...</p>
-                                <p className="text-[10px] text-gray-400 mt-1">Be the first to make a move.</p>
-                            </div>
+            {/* EXPANDED CONTENT AREA */}
+            <div className={clsx(
+                "transition-[max-height] duration-500 ease-in-out overflow-hidden bg-white/40 dark:bg-black/20",
+                isExpanded ? "max-h-[60vh]" : "max-h-0"
+            )}>
+                {/* Tab Switcher */}
+                <div className="flex p-2 gap-2 border-b border-white/20">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setActiveTab('live'); }}
+                        className={clsx(
+                            "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2",
+                            activeTab === 'live'
+                                ? "bg-white/80 dark:bg-black/50 shadow-sm text-gray-900 dark:text-white"
+                                : "text-gray-500 dark:text-gray-400 hover:bg-white/30 hover:text-gray-900"
                         )}
+                    >
+                        <Activity size={14} /> Live Feed
+                    </button>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setActiveTab('vibe'); }}
+                        className={clsx(
+                            "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2",
+                            activeTab === 'vibe'
+                                ? "bg-white/80 dark:bg-black/50 shadow-sm text-gray-900 dark:text-white"
+                                : "text-gray-500 dark:text-gray-400 hover:bg-white/30 hover:text-gray-900"
+                        )}
+                    >
+                        <MapPin size={14} /> Area Vibe
+                    </button>
+                </div>
 
-                        {!isLoading && displayFeed.map((item) => (
-                            <div key={item.event_id} className="flex gap-3 p-4 hover:bg-white/40 dark:hover:bg-black/20 transition-colors cursor-pointer group">
-                                <div className={clsx(
-                                    "h-8 w-8 rounded-full flex items-center justify-center shrink-0 shadow-sm border border-white/40",
-                                    item.type === 'CLAIM' && "bg-teal-100 text-teal-600",
-                                    item.type === 'STATUS' && "bg-teal-50 text-teal-500",
-                                    item.type === 'STORY' && "bg-purple-100 text-purple-600"
-                                )}>
-                                    {item.type === 'CLAIM' && <Home size={14} />}
-                                    {item.type === 'STATUS' && <Activity size={14} />}
-                                    {item.type === 'STORY' && <MapPin size={14} />}
-                                    {/* Default fallback icon if needed */}
-                                    {!['CLAIM', 'STATUS', 'STORY'].includes(item.type) && <Activity size={14} className="text-gray-500" />}
+                {/* SCROLLABLE CONTENT */}
+                <div className="overflow-y-auto scrollbar-hide max-h-[50vh] p-4">
+
+                    {/* TAB: LIVE FEED */}
+                    {activeTab === 'live' && (
+                        <div className="space-y-3">
+                            {isLoading && <div className="text-center text-xs text-gray-400 py-4">Listening for local signals...</div>}
+
+                            {!isLoading && displayFeed.length === 0 && (
+                                <div className="text-center py-6">
+                                    <Coffee className="mx-auto h-8 w-8 text-teal-500/50 mb-2" />
+                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Quiet day nearby...</p>
+                                    <p className="text-xs text-slate-500">Nothing happening in this area recently.</p>
                                 </div>
-                                <div>
-                                    <p className="text-xs font-semibold text-slate-900 dark:text-gray-200 leading-snug">
-                                        {item.summary_text}
-                                    </p>
-                                    <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
-                                        {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        <ArrowRight size={8} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                                    </p>
+                            )}
+
+                            {!isLoading && displayFeed.map((item) => (
+                                <div
+                                    key={item.event_id}
+                                    onClick={() => handleFeedItemClick(item)}
+                                    className="flex gap-3 p-3 rounded-xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 hover:bg-white/60 transition-colors cursor-pointer group"
+                                >
+                                    {/* Thumbnail or Icon */}
+                                    <div className="shrink-0">
+                                        {item.market_image_url ? (
+                                            <img
+                                                src={item.market_image_url}
+                                                alt="Property"
+                                                className="h-10 w-10 rounded-lg object-cover border border-white/20 shadow-sm"
+                                            />
+                                        ) : (
+                                            <div className={clsx(
+                                                "h-10 w-10 rounded-lg flex items-center justify-center shadow-sm border border-white/40",
+                                                item.type === 'CLAIM' && "bg-teal-100 text-teal-600",
+                                                item.type === 'STATUS' && "bg-teal-50 text-teal-500",
+                                                item.type === 'STORY' && "bg-purple-100 text-purple-600"
+                                            )}>
+                                                {item.type === 'CLAIM' && <Home size={16} />}
+                                                {item.type === 'STATUS' && <Activity size={16} />}
+                                                {item.type === 'STORY' && <MapPin size={16} />}
+                                                {!['CLAIM', 'STATUS', 'STORY'].includes(item.type) && <Activity size={16} className="text-gray-500" />}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex-1 min-w-0">
+                                        {/* Rich Text: Bold Street Name */}
+                                        <p className="text-xs font-medium text-slate-900 dark:text-gray-100 leading-snug">
+                                            {item.type === 'CLAIM' && "New Claim on "}
+                                            {item.type === 'STORY' && "New Story on "}
+                                            {item.type === 'STATUS' && "Update on "}
+                                            <span className="font-bold">{item.street || "a property"}</span>
+                                        </p>
+                                        <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-tight mt-0.5 truncate">
+                                            {item.summary_text.replace(/New .* on /, '')}
+                                        </p>
+
+                                        <div className="flex items-center gap-2 mt-1.5">
+                                            <p className="text-[10px] text-gray-400">
+                                                {/* Relative Time Mockup - ideally use date-fns/dayjs */}
+                                                {/* Simple JS formatter for now */}
+                                                {new Date(item.created_at).toLocaleDateString() === new Date().toLocaleDateString()
+                                                    ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                                    : new Date(item.created_at).toLocaleDateString()}
+                                            </p>
+                                            {/* Pulsating Action Arrow */}
+                                            <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity flex items-center text-teal-600 gap-1">
+                                                <span className="text-[10px] font-bold">FLY TO</span>
+                                                <ArrowRight size={12} className="animate-pulse" />
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                            ))}
+                        </div>
+                    )}
 
-                {/* TAB: AREA VIBE */}
-                {activeTab === 'vibe' && (
-                    <div key={currentVibe.name} className="p-5 space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
-
-                        {/* Header */}
-                        <div>
-                            <div className="flex items-center justify-between mb-1">
-                                <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                    {/* TAB: AREA VIBE */}
+                    {activeTab === 'vibe' && (
+                        <div className="space-y-5 animate-in fade-in zoom-in-95 duration-300">
+                            {/* ... same as before, preserving vibe logic ... */}
+                            {/* Header */}
+                            <div>
+                                <h3 className="text-lg font-black text-slate-900 dark:text-white leading-tight">
                                     {currentVibe.name}
                                 </h3>
-                                {/* Mobile/Status Indicator */}
-                                <div className="h-2 w-2 rounded-full bg-teal-500 animate-pulse" />
+                                <p className="text-xs font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest mt-1">
+                                    {currentVibe.punchline}
+                                </p>
                             </div>
-                            <p className="text-xs font-bold text-teal-700 dark:text-teal-400 uppercase tracking-wider">
-                                {currentVibe.punchline}
-                            </p>
-                        </div>
 
-                        {/* Vibe Box */}
-                        <div className="p-3 rounded-xl bg-white/40 dark:bg-black/20 border border-white/30 dark:border-white/10">
-                            <p className="text-sm italic text-slate-800 dark:text-gray-300 leading-relaxed font-medium">
-                                "{currentVibe.vibe}"
-                            </p>
-                        </div>
+                            {/* Vibe Quote */}
+                            <div className="p-3 rounded-xl bg-teal-50/50 dark:bg-teal-900/20 border border-teal-100 dark:border-teal-800/30">
+                                <p className="text-sm italic text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
+                                    "{currentVibe.vibe}"
+                                </p>
+                            </div>
 
-                        {/* Description */}
-                        <div>
-                            <p className="text-sm text-slate-900 dark:text-gray-200 leading-relaxed font-medium">
+                            {/* Description */}
+                            <p className="text-sm text-slate-800 dark:text-gray-200 leading-relaxed">
                                 {currentVibe.description}
                             </p>
+
+                            {/* Tags */}
+                            {currentVibe.tags.length > 0 && (
+                                <div className="space-y-2">
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase">Known For</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {currentVibe.tags.map((tag, i) => {
+                                            const Icon = getTagIcon(tag);
+                                            const color = getTagColor(tag);
+                                            return (
+                                                <span key={i} className={clsx(
+                                                    "px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border shadow-sm cursor-default",
+                                                    color === "amber" && "bg-amber-50 text-amber-700 border-amber-100",
+                                                    color === "blue" && "bg-blue-50 text-blue-700 border-blue-100",
+                                                    color === "rose" && "bg-rose-50 text-rose-700 border-rose-100",
+                                                    color === "purple" && "bg-purple-50 text-purple-700 border-purple-100",
+                                                    color === "cyan" && "bg-cyan-50 text-cyan-700 border-cyan-100",
+                                                    color === "orange" && "bg-orange-50 text-orange-700 border-orange-100",
+                                                    color === "emerald" && "bg-emerald-50 text-emerald-700 border-emerald-100",
+                                                    color === "indigo" && "bg-indigo-50 text-indigo-700 border-indigo-100",
+                                                    color === "slate" && "bg-slate-50 text-slate-700 border-slate-100",
+                                                    color === "sky" && "bg-sky-50 text-sky-700 border-sky-100",
+                                                    color === "teal" && "bg-teal-50 text-teal-700 border-teal-100",
+                                                    color === "violet" && "bg-violet-50 text-violet-700 border-violet-100",
+                                                    color === "lime" && "bg-lime-50 text-lime-700 border-lime-100",
+                                                    color === "yellow" && "bg-yellow-50 text-yellow-700 border-yellow-100",
+                                                    color === "pink" && "bg-pink-50 text-pink-700 border-pink-100",
+                                                    color === "stone" && "bg-stone-50 text-stone-700 border-stone-100",
+                                                )}>
+                                                    <Icon size={12} /> {tag}
+                                                </span>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Price Band */}
+                            {currentVibe.id !== 'north-tyneside' && (
+                                <div className="pt-2">
+                                    <div className="bg-white/40 dark:bg-white/5 p-4 rounded-2xl border border-white/40 dark:border-white/10 text-center">
+                                        <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold mb-1">Average Price</p>
+                                        <p className="text-xl font-black text-slate-900 dark:text-white">{currentVibe.priceBand}</p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
-
-                        {/* Tags */}
-                        {currentVibe.tags.length > 0 && (
-                            <div className="space-y-2">
-                                <p className="text-[10px] font-bold text-gray-400 uppercase">Known For</p>
-                                <div className="flex flex-wrap gap-2">
-                                    {currentVibe.tags.map((tag, i) => {
-                                        const Icon = getTagIcon(tag);
-                                        const color = getTagColor(tag);
-                                        return (
-                                            <span key={i} className={clsx(
-                                                "px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border shadow-sm transition-transform hover:scale-105 cursor-default",
-                                                color === "amber" && "bg-amber-50 text-amber-700 border-amber-100",
-                                                color === "blue" && "bg-blue-50 text-blue-700 border-blue-100",
-                                                color === "rose" && "bg-rose-50 text-rose-700 border-rose-100",
-                                                color === "purple" && "bg-purple-50 text-purple-700 border-purple-100",
-                                                color === "cyan" && "bg-cyan-50 text-cyan-700 border-cyan-100",
-                                                color === "orange" && "bg-orange-50 text-orange-700 border-orange-100",
-                                                color === "emerald" && "bg-emerald-50 text-emerald-700 border-emerald-100",
-                                                color === "indigo" && "bg-indigo-50 text-indigo-700 border-indigo-100",
-                                                color === "slate" && "bg-slate-50 text-slate-700 border-slate-100",
-                                                color === "sky" && "bg-sky-50 text-sky-700 border-sky-100",
-                                                color === "teal" && "bg-teal-50 text-teal-700 border-teal-100",
-                                                color === "violet" && "bg-violet-50 text-violet-700 border-violet-100",
-                                                color === "lime" && "bg-lime-50 text-lime-700 border-lime-100",
-                                                color === "yellow" && "bg-yellow-50 text-yellow-700 border-yellow-100",
-                                                color === "pink" && "bg-pink-50 text-pink-700 border-pink-100",
-                                                color === "stone" && "bg-stone-50 text-stone-700 border-stone-100",
-                                            )}>
-                                                <Icon size={12} /> {tag}
-                                            </span>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Price Band */}
-                        {currentVibe.id !== 'north-tyneside' && (
-                            <div className="grid grid-cols-1 gap-3 pt-2">
-                                <div className="bg-white/40 dark:bg-white/5 p-3 rounded-2xl border border-white/40 dark:border-white/10 text-center">
-                                    <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold mb-1">Average Price</p>
-                                    <p className="text-xl font-black text-slate-900 dark:text-white">{currentVibe.priceBand}</p>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
         </div>
     );

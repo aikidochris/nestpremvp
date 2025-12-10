@@ -317,7 +317,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         .from('intent_flags')
         .select('soft_listing,is_for_sale,is_for_rent')
         .eq('property_id', selectedHome!.id)
-        .eq('owner_id', currentUserId)
+        .eq('owner_id', currentUserId!)
         .maybeSingle()
 
       if (cancelled) return
@@ -874,7 +874,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       }
 
       if (data) {
-        const casted = data as MapProperty
+        const casted = data as unknown as MapProperty
         setShops((prev) => (prev.some((p) => p.id === casted.id) ? prev : [...prev, casted]))
         return casted
       }
@@ -1105,6 +1105,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
             currentCenter={mapCenter}
             currentZoom={mapZoom}
             className="pointer-events-auto"
+            onLocationSelect={handleLocationSelect}
           />
         </div>
       }

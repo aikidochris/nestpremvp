@@ -65,8 +65,10 @@ export default function MessageModal({ isOpen, onClose, selectedHome, currentUse
         setMessageError(null)
 
         try {
-            // 1. Guard against Null Recipient for Direct Messages
-            if (messageMode === 'direct' && !selectedHome.claimed_by_user_id) {
+            // 1. Guard against Null Recipient for Direct/Note Messages
+            // Future notes don't need a recipient (claimed_by_user_id is null)
+            if (messageMode !== 'future' && !selectedHome.claimed_by_user_id) {
+                // Should theoretically not happen if UI is correct, but safe guard
                 throw new Error("Cannot message owner: This home is unclaimed.")
             }
 
@@ -83,18 +85,52 @@ export default function MessageModal({ isOpen, onClose, selectedHome, currentUse
                 throw new Error('You have sent too many messages today. Please try again tomorrow.')
             }
 
-            // 3. Prepare Payload
+            // 3. Resolve Thread ID
+            let resolvedThreadId: string | null = null
+
+            if (messageMode === 'future') {
+                resolvedThreadId = null
+            } else {
+                // 'direct' or 'note' mode - We need a thread_id
+                const neighborId = selectedHome.claimed_by_user_id
+
+                // Try to find an existing thread for this property between these two users
+                const { data: existingThreads, error: threadError } = await (supabase as any)
+                    .from('messages')
+                    .select('thread_id')
+                    .eq('property_id', selectedHome.id)
+                    .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${neighborId}),and(sender_id.eq.${neighborId},receiver_id.eq.${currentUser.id})`)
+                    .not('thread_id', 'is', null)
+                    .limit(1)
+
+                if (threadError) {
+                    console.error("Error finding thread:", threadError)
+                    // We can proceed to create a new thread if fetch fails, or throw? 
+                    // Safer to generate new one to avoid blocking user.
+                }
+
+                if (existingThreads && existingThreads.length > 0) {
+                    resolvedThreadId = existingThreads[0].thread_id
+                } else {
+                    // Start a new thread
+                    resolvedThreadId = crypto.randomUUID()
+                }
+            }
+
+            // 4. Prepare Payload
             // Allow receiver_id to be null if it's a future note
             const payload = {
                 sender_id: currentUser.id,
                 receiver_id: selectedHome.claimed_by_user_id || null,
                 property_id: selectedHome.id,
-                body: messageBody,
+                content: messageBody,
+                body: messageBody, // Keep legacy body for now
                 status: messageMode === 'note' ? 'pending_request' :
                     messageMode === 'future' ? 'future_note' : 'unread',
+                thread_id: resolvedThreadId
             }
 
-            // 4. Send
+            // 5. Send
             const { error } = await (supabase as any)
                 .from('messages')
                 .insert(payload)

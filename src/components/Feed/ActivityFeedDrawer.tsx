@@ -6,6 +6,7 @@ interface ActivityFeedDrawerProps {
     userId?: string | null
     isOpen: boolean
     onClose: () => void
+    onFlyToProperty?: (lat: number, lon: number, propertyId: string) => void
 }
 
 function timeAgo(dateString: string) {
@@ -23,7 +24,7 @@ function timeAgo(dateString: string) {
     return date.toLocaleDateString()
 }
 
-export default function ActivityFeedDrawer({ userId, isOpen, onClose }: ActivityFeedDrawerProps) {
+export default function ActivityFeedDrawer({ userId, isOpen, onClose, onFlyToProperty }: ActivityFeedDrawerProps) {
     const { feedItems, isLoading, error } = useActivityFeed(userId)
     const router = useRouter()
 
@@ -43,16 +44,14 @@ export default function ActivityFeedDrawer({ userId, isOpen, onClose }: Activity
     }
 
     const handleItemClick = (item: FeedItem) => {
-        // Navigate to property using deep link param which HomeClient seems to handle
-        const url = new URL(window.location.href)
-        url.searchParams.set('propertyId', item.property_id)
-        window.history.pushState(null, '', url.toString())
-        // We rely on HomeClient's existing effect to catch this param or we can force reload/dispatch event
-        // The existing code in HomeClient listens to searchParams change via next/navigation? 
-        // Actually HomeClient uses useSearchParams. Next.js App Router useSearchParams might not update on pushState instantly without router.push/replace
-        // So better use router.push
-        router.push(`/?propertyId=${item.property_id}`)
-        onClose()
+        if (onFlyToProperty && item.lat != null && item.lon != null) {
+            onFlyToProperty(item.lat, item.lon, item.property_id)
+            onClose()
+        } else {
+            // Fallback to router.push if coords not available or callback not provided
+            router.push(`/?propertyId=${item.property_id}`)
+            onClose()
+        }
     }
 
     return (
@@ -104,14 +103,14 @@ export default function ActivityFeedDrawer({ userId, isOpen, onClose }: Activity
                             >
                                 <div className="flex items-start gap-4">
                                     <div className={`mt-1 rounded-full p-2 ${item.type === 'STATUS' ? 'bg-orange-50' :
-                                            item.type === 'CLAIM' ? 'bg-teal-50' : 'bg-purple-50'
+                                        item.type === 'CLAIM' ? 'bg-teal-50' : 'bg-purple-50'
                                         }`}>
                                         {getIcon(item.type)}
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between gap-2 mb-1">
                                             <span className={`text-[10px] font-bold uppercase tracking-wider ${item.type === 'STATUS' ? 'text-secondary' :
-                                                    item.type === 'CLAIM' ? 'text-primary' : 'text-purple-600'
+                                                item.type === 'CLAIM' ? 'text-primary' : 'text-purple-600'
                                                 }`}>
                                                 {item.type}
                                             </span>

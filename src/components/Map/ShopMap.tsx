@@ -73,12 +73,13 @@ function MapClickHandler({
   })
   return null
 }
-
+// ... (omitted helper components)
 
 const INDIVIDUAL_MARKER_ZOOM = 16
 const CLUSTER_MAX_ZOOM = 15
 
 function buildDisplayLabel(property: MapProperty) {
+  // ... (unchanged)
   const { house_number, street, postcode } = property
   if (house_number && street) {
     return `${house_number} ${street}${postcode ? `, ${postcode}` : ''}`
@@ -119,6 +120,7 @@ export default function ShopMap({
 }: ShopMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
 
+  // ... (state setup unchanged)
   // Poi Types
   const poiTypes = useMemo(() => {
     const types: string[] = []
@@ -131,7 +133,6 @@ export default function ShopMap({
   const [heatmapPoints, setHeatmapPoints] = useState<HeatmapPoint[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showLoadingBadge, setShowLoadingBadge] = useState(false)
-
 
   const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
   const hasFitBounds = useRef(false)
@@ -151,6 +152,7 @@ export default function ShopMap({
   const [creating, setCreating] = useState(false)
 
   const handleCreateProperty = async () => {
+    // ... (unchanged)
     if (!newPropertyLoc) return
     setCreating(true)
     try {
@@ -177,7 +179,8 @@ export default function ShopMap({
     }
   }
 
-  // Reset fetch key when switching modes so we force a refresh
+  // ... (effects unchanged)
+  // Reset fetch key when switching modes
   useEffect(() => {
     lastFetchKey.current = null
   }, [heatmapMode, filters])
@@ -199,6 +202,7 @@ export default function ShopMap({
     },
     [filters, heatmapMode]
   )
+
 
   const propertyMap = useMemo(() => {
     const m = new Map<string, MapProperty>()
@@ -286,7 +290,6 @@ export default function ShopMap({
       return '#007C7C'
     }
     // Priority 3: Default / Unclaimed / No Signal -> Slate 500
-    // This ensures grey clusters are visible for density
     return '#64748B' // slate-500
   }
 
@@ -304,7 +307,7 @@ export default function ShopMap({
     return clusterIndex.getClusters([west, south, east, north], zoomLevel)
   }, [clusterIndex, map, zoomLevel, heatmapMode])
 
-  // Delay showing the loading badge to avoid flicker on quick pans/zooms
+  // ... (effects unchanged: Delay loading badge, fetchForBounds, debouncedFetch)
   useEffect(() => {
     let timeout: ReturnType<typeof setTimeout> | null = null
     if (isLoading) {
@@ -318,7 +321,9 @@ export default function ShopMap({
     }
   }, [isLoading])
 
+
   const fetchForBounds = useCallback(async () => {
+    // ... (unchanged)
     if (!map) return
     if (suppressFetchUntil.current > Date.now()) {
       return
@@ -351,7 +356,7 @@ export default function ShopMap({
 
     try {
       if (heatmapMode) {
-        // RPC Call for Heatmap
+        // ... (heatmap fetch unchanged)
         const params = {
           north: bounds.getNorth(),
           south: bounds.getSouth(),
@@ -365,13 +370,12 @@ export default function ShopMap({
 
         if (error) {
           console.error('[ShopMap] heatmap fetch error', JSON.stringify(error, null, 2))
-          // Fallback to empty array on error to prevent UI crash
           setHeatmapPoints([])
         } else {
           setHeatmapPoints(data as HeatmapPoint[] ?? [])
         }
       } else {
-        // Standard API Call
+        // ... (properties fetch unchanged)
         const params = new URLSearchParams()
         params.set('north', bounds.getNorth().toString())
         params.set('south', bounds.getSouth().toString())
@@ -483,8 +487,8 @@ export default function ShopMap({
     const borderWidth = 2
     return L.divIcon({
       html: `
-        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid ${borderColor};background:#ffffff;border-radius:9999px;" aria-hidden="true"></div>
-      `,
+          <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid ${borderColor};background:#ffffff;border-radius:9999px;" aria-hidden="true"></div>
+        `,
       className: 'nest-pin',
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
@@ -497,10 +501,10 @@ export default function ShopMap({
     const size = count < 20 ? 40 : count < 100 ? 48 : 56
     return L.divIcon({
       html: `
-        <div class="rounded-full text-white font-bold flex items-center justify-center border-4 border-white shadow-xl transition-transform hover:scale-110 ${sizeClass}" style="background:${color}">
-          ${count}
-        </div>
-      `,
+          <div class="rounded-full text-white font-bold flex items-center justify-center border-4 border-white shadow-xl transition-transform hover:scale-110 ${sizeClass}" style="background:${color}">
+            ${count}
+          </div>
+        `,
       className: 'nest-cluster',
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
@@ -519,33 +523,30 @@ export default function ShopMap({
 
     // TRAFFIC LIGHT SYSTEM
     if (isSale) {
-      // RED: #F43F5E (rose-500)
       const icon = createSolidIcon('#F43F5E', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isRent) {
-      // PURPLE/INDIGO: #6366F1 (indigo-500)
       const icon = createSolidIcon('#6366F1', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isOpen) {
-      // TEAL: #14B8A6 (teal-500)
       const icon = createSolidIcon('#14B8A6', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 500 }
     }
     if (isClaimed) {
-      // GREY: #64748B (slate-500)
       const icon = createSolidIcon('#64748B', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 400 }
     }
 
-    // Unclaimed: White (Solid White with Slate Border for visibility)
-    const icon = createSolidIcon('#FFFFFF', 12, isOwner, '#CBD5E1') // slate-300 border
+    // Unclaimed: White
+    const icon = createSolidIcon('#FFFFFF', 12, isOwner, '#CBD5E1')
     return { icon, zIndexOffset: 0 }
   }
 
   const handleClusterClick = useCallback(
     (cluster: any) => {
+      // ... (unchanged)
       if (!map) return
       const expansionZoom = clusterIndex.getClusterExpansionZoom(cluster.id)
       const [lon, lat] = cluster.geometry.coordinates

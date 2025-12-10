@@ -191,6 +191,26 @@ export default function MessageModal({ isOpen, onClose, selectedHome, currentUse
                                 value={messageBody}
                                 onChange={(e) => setMessageBody(e.target.value)}
                             />
+
+                            {/* Quick Chips - Smart Defaults */}
+                            <div className="flex flex-wrap gap-2 mt-2">
+                                {[
+                                    { emoji: '👋', text: 'Just saying hi' },
+                                    { emoji: '🏠', text: 'Is this for sale?' },
+                                    { emoji: '❤️', text: 'Love the renovation' },
+                                ].map((chip) => (
+                                    <button
+                                        key={chip.text}
+                                        type="button"
+                                        onClick={() => setMessageBody((prev) => prev + (prev ? ' ' : '') + chip.text)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+                                    >
+                                        <span>{chip.emoji}</span>
+                                        <span>{chip.text}</span>
+                                    </button>
+                                ))}
+                            </div>
+
                             {messageError && (
                                 <p className="text-xs text-red-600">{messageError}</p>
                             )}

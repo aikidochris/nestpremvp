@@ -27,7 +27,7 @@ export async function togglePropertyFollow(propertyId: string, isCurrentlyFollow
     } else {
       const { error } = await supabase
         .from('follows')
-        .insert({ user_id: user.id, property_id: propertyId })
+        .insert({ user_id: user.id, property_id: propertyId, follow_type: 'property' })
 
       if (error) throw error
     }

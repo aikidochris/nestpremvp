@@ -16,6 +16,9 @@ export interface MapProperty {
     is_for_rent: boolean
     has_recent_activity: boolean
     image_url?: string | null
+    market_image_url?: string | null
+    bedroom_estimate?: number | null
+    home_type?: string | null
     last_sale_price?: number | null
     last_sale_date?: string | null
     energy_rating?: string | null
@@ -27,6 +30,7 @@ export interface MapProperty {
         soft_listing: boolean
     }
 }
+
 
 export interface UserProfile {
     id: string

@@ -23,7 +23,12 @@ import { useProperties } from '@/hooks/useProperties'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
 import HomeStorySection from '@/components/Shop/HomeStorySection'
 import MessageModal from '@/components/Messaging/MessageModal'
+import OwnerChecklist from '@/components/Shop/OwnerChecklist'
+import HomeFactsEditor from '@/components/Shop/HomeFactsEditor'
 import FlagModal from '@/components/UI/FlagModal'
+import { useConfetti } from '@/hooks/useConfetti'
+import { calculateProfileStrength } from '@/lib/profileLogic'
+import HomeStoryDisplay from '@/components/Shop/HomeStoryDisplay'
 
 
 
@@ -48,8 +53,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
+  const { fireCelebration } = useConfetti()
   const enableGeolocation = false // keep code for future reintroduction
   const [searchQuery, setSearchQuery] = useState('')
+  const [claimToast, setClaimToast] = useState<string | null>(null)
 
   // Hook Integration
   const { shops, setShops, fetchProperties: fetchUserShops } = useProperties(initialShops)
@@ -80,6 +87,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     is_open_to_talking: boolean
     is_claimed: boolean
     claimed_by_user_id: string | null
+    status_confirmed: boolean // NEW: track explicit intent confirmation locally
   }>>>({})
   const [mapRefreshSignal, setMapRefreshSignal] = useState(0)
   const [mapReady, setMapReady] = useState(false)
@@ -94,6 +102,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const [heroImage, setHeroImage] = useState<string | null>(null)
   const [heroUploading, setHeroUploading] = useState(false)
   const heroFileInputRef = useRef<HTMLInputElement | null>(null)
+  const statusSelectorRef = useRef<HTMLDivElement | null>(null)
+
+  // Graduation State
+  const [hasInteracted, setHasInteracted] = useState(false) // Track if user has touched controls this session
+  const [isEditingFacts, setIsEditingFacts] = useState(false) // For post-graduation editing logic
 
 
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
@@ -235,6 +248,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       setSoftListingLoading(false)
       setSoftListingSaving(false)
       setSoftListingError(null)
+      setHasInteracted(false) // Reset interaction state
+      setIsEditingFacts(false) // Reset editing state
       setIsMessageModalOpen(false)
       setMessageModalMode(undefined)
       setAdminEditMode(false)
@@ -348,6 +363,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           is_for_rent: nextRent,
           claimed_by_user_id: claimRecord?.user_id ?? selectedHome?.claimed_by_user_id ?? currentUserId ?? null,
           is_claimed: true,
+          status_confirmed: false // Initial load - status is NOT visually confirmed yet unless we tracked it in DB (we don't yet)
         })
         setShops((prev) =>
           prev.map((p) =>
@@ -465,6 +481,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     is_open_to_talking: boolean
     is_claimed: boolean
     claimed_by_user_id: string | null
+    status_confirmed: boolean
   }>) => {
     setIntentOverrides((prev) => ({
       ...prev,
@@ -513,6 +530,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       setSelectedHome(prev => prev ? { ...prev, is_claimed: true, claimed_by_user_id: currentUser.id } : prev)
       // Also update in the shops array for map consistency
       setShops(prev => prev.map(p => p.id === selectedHome.id ? { ...p, is_claimed: true, claimed_by_user_id: currentUser.id } : p))
+      // 🎉 Celebration effect!
+      fireCelebration()
+      setClaimToast('Welcome Home! You now own this pin.')
+      setTimeout(() => setClaimToast(null), 4000)
     }
   }
 
@@ -610,9 +631,70 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     alert('Status updated to Open to Talking. You can now continue the conversation from Messages.')
   }
 
+  // Use centralized logic
+  const strengthResult = calculateProfileStrength(selectedHome, intentOverrides[selectedHome?.id || ''] || {}, heroImage)
+  const profileStrength = strengthResult.total
+  const isGraduated = profileStrength === 100
+
+  const statusSet = !!intentOverrides[selectedHome?.id || '']?.status_confirmed
+
+  const handleVerifyFactsClick = () => {
+    // Scroll to editor (it's right there, maybe just focus?)
+    const el = document.getElementById('home-facts-editor')
+    if (el) el.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const handleSetStatusClick = () => {
+    const el = document.getElementById('owner-controls')
+    if (el) el.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const handleSaveFacts = async (data: { bedrooms: number; type: string; story: string }) => {
+    if (!selectedHome || !currentUser) return
+    setAdminSaving(true) // Reuse saving state or make new one
+
+    // 1. Update Property fields
+    const { error: propError } = await supabase
+      .from('properties')
+      .update({
+        bedroom_estimate: data.bedrooms,
+        home_type: data.type
+      } as any)
+      .eq('id', selectedHome.id)
+
+    // 2. Update Story (if provided)
+    if (data.story) {
+      const { error: storyError } = await supabase
+        .from('home_story')
+        .upsert({
+          property_id: selectedHome.id,
+          summary_text: data.story,
+          // user_id: currentUser.id // Optional depending on schema
+        } as any, { onConflict: 'property_id' })
+    }
+
+    if (propError) {
+      console.error('Error saving facts', propError)
+      alert('Failed to save facts')
+      setAdminSaving(false)
+      return
+    }
+
+    // Update local state
+    setShops(prev => prev.map(p => p.id === selectedHome.id ? { ...p, bedroom_estimate: data.bedrooms, home_type: data.type } : p))
+    setSelectedHome(prev => prev ? { ...prev, bedroom_estimate: data.bedrooms, home_type: data.type } : prev)
+
+    // Stop editing if in graduated mode
+    setIsEditingFacts(false)
+
+    setAdminSaving(false)
+  }
+
   const handleSetOwnerStatus = async (nextStatus: 'settled' | 'open' | 'sale' | 'rent') => {
     if (!selectedHome || !currentUser) return
     if (!claimRecord || claimRecord.property_id !== selectedHome.id || claimRecord.user_id !== currentUser.id) return
+
+    setHasInteracted(true) // Mark as interacted!
 
     const prevSoft = isOpenToTalking
     const prevSale = localForSale
@@ -632,6 +714,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       is_for_rent: nextRent,
       claimed_by_user_id: currentUser.id,
       is_claimed: true,
+      status_confirmed: true // also confirm here if triggered by function
     })
     setSoftListingSaving(true)
     setSoftListingError(null)
@@ -706,65 +789,126 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
   const renderOwnershipControls = () => {
     if (claimRecord && claimRecord.property_id === selectedHome?.id && claimRecord.user_id === currentUserId) {
+      // Calculate checklist completion
+      /* Using centralized strengthResult for checklist props */
+
       return (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Owner controls</p>
-              <p className="text-xs text-gray-600">Choose how you want to signal intent.</p>
-              {softListingError && (
-                <p className="mt-1 text-xs text-red-600">{softListingError}</p>
+        <>
+          {/* OWNER CHECKLIST OR GRADUATED DISPLAY */}
+          {isOwner && (
+            <>
+              {/* IF Graduated (100%), show Story Display. Otherwise show checklist/editor or if editing explicitly */}
+              {isGraduated && !isEditingFacts ? (
+                <div className="mb-6">
+                  <HomeStoryDisplay
+                    story={null}
+                    bedroomCount={selectedHome?.bedroom_estimate ?? null}
+                    homeType={selectedHome?.home_type ?? null}
+                    onEdit={() => setIsEditingFacts(true)}
+                  />
+                </div>
+              ) : (
+                <>
+                  {!isGraduated && (
+                    <OwnerChecklist
+                      hasPhoto={strengthResult.breakdown.hasPhoto}
+                      hasFacts={strengthResult.breakdown.hasFacts}
+                      hasStatusSet={strengthResult.breakdown.hasIntent}
+                      onAddPhotoClick={() => heroFileInputRef.current?.click()}
+                      onVerifyFactsClick={handleVerifyFactsClick}
+                      onSetStatusClick={handleSetStatusClick}
+                    />
+                  )}
+
+                  <div id="home-facts-editor" className="mb-6">
+                    <HomeFactsEditor
+                      bedroomCount={selectedHome?.bedroom_estimate ?? null}
+                      homeType={selectedHome?.home_type ?? null}
+                      oneLiner={""}
+                      onSave={handleSaveFacts}
+                      isSaving={adminSaving}
+                    />
+                  </div>
+                </>
               )}
-              {!softListingError && (softListingLoading || softListingSaving) && (
-                <p className="mt-1 text-xs text-gray-500">
-                  {softListingLoading ? 'Loading preference...' : 'Saving...'}
-                </p>
-              )}
+            </>
+          )}
+
+          {/* PROPERTY DATA GRID */}
+          <div ref={statusSelectorRef} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Owner controls</p>
+                <p className="text-xs text-gray-600">Choose how you want to signal intent.</p>
+                {softListingError && (
+                  <p className="mt-1 text-xs text-red-600">{softListingError}</p>
+                )}
+                {!softListingError && (softListingLoading || softListingSaving) && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {softListingLoading ? 'Loading preference...' : 'Saving...'}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { key: 'settled', label: 'Settled', description: 'No active signals', tone: 'neutral', icon: <HomeIcon className="h-4 w-4" /> },
+                { key: 'open', label: 'Open to Talking', description: 'Soft listing', tone: 'teal', icon: <MessageCircle className="h-4 w-4" /> },
+                { key: 'sale', label: 'For Sale', description: 'High intent', tone: 'coral', icon: <Tag className="h-4 w-4" /> },
+                { key: 'rent', label: 'For Rent', description: 'Rental interest', tone: 'rent', icon: <Building2 className="h-4 w-4" /> },
+              ].map((option) => {
+                const isActive = ownerStatus === option.key
+                // Ghost Logic: If not active, not interacted yet, and profile incomplete -> Show Ghost (Clean/Empty)
+                const isGhost = !hasInteracted && profileStrength < 100 && !isActive
+
+                // Visuals
+                let buttonClass = ""
+                if (isGhost) {
+                  // Clean/Empty look (User Override: White bg, Slate-200 border, Slate-400 text)
+                  buttonClass = "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:text-slate-500"
+                } else if (isActive) {
+                  // Active Colors
+                  if (option.tone === 'teal') buttonClass = "bg-[#007C7C] border-[#007C7C] text-white shadow-md ring-1 ring-[#007C7C]"
+                  else if (option.tone === 'coral') buttonClass = "bg-[#E65F52] border-[#E65F52] text-white shadow-md ring-1 ring-[#E65F52]"
+                  else if (option.tone === 'rent') buttonClass = "bg-[#6366F1] border-[#6366F1] text-white shadow-md ring-1 ring-[#6366F1]"
+                  else buttonClass = "bg-slate-800 border-slate-800 text-white shadow-md ring-1 ring-slate-800" // Settled Active
+                } else {
+                  // Initial / Inactive but Interactive (Standard)
+                  buttonClass = "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-600"
+                }
+
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => handleSetOwnerStatus(option.key as OwnerStatus)}
+                    disabled={softListingLoading || softListingSaving}
+                    className={clsx(
+                      'w-full rounded-xl border p-4 text-left transition-all flex flex-col items-start gap-1',
+                      softListingLoading || softListingSaving ? 'opacity-60 cursor-not-allowed' : '',
+                      buttonClass
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      {option.icon}
+                      <p className="text-sm font-semibold">
+                        {option.label}
+                      </p>
+                    </div>
+                    <p className={clsx('text-xs', isActive ? 'text-white/90' : isGhost ? 'text-slate-400' : 'text-slate-500')}>
+                      {option.description}
+                    </p>
+                    {isActive && (
+                      <div className="absolute top-2 right-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-white/90 animate-pulse shadow-sm" />
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { key: 'settled', label: 'Settled', description: 'No active signals', tone: 'neutral', icon: <HomeIcon className="h-4 w-4" /> },
-              { key: 'open', label: 'Open to Talking', description: 'Soft listing', tone: 'teal', icon: <MessageCircle className="h-4 w-4" /> },
-              { key: 'sale', label: 'For Sale', description: 'High intent', tone: 'coral', icon: <Tag className="h-4 w-4" /> },
-              { key: 'rent', label: 'For Rent', description: 'Rental interest', tone: 'rent', icon: <Building2 className="h-4 w-4" /> },
-            ].map((option) => {
-              const isActive = ownerStatus === option.key
-              const activeClass =
-                option.tone === 'teal'
-                  ? 'bg-[#007C7C] border-[#007C7C] text-white'
-                  : option.tone === 'coral'
-                    ? 'bg-[#E65F52] border-[#E65F52] text-white'
-                    : option.tone === 'rent'
-                      ? 'bg-[#6366F1] border-[#6366F1] text-white'
-                      : 'bg-slate-900 border-slate-900 text-white'
-
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => handleSetOwnerStatus(option.key as OwnerStatus)}
-                  disabled={softListingLoading || softListingSaving}
-                  className={clsx(
-                    'w-full rounded-xl border p-4 text-left transition-all flex flex-col items-start gap-1',
-                    softListingLoading || softListingSaving ? 'opacity-60 cursor-not-allowed' : 'hover:border-slate-300',
-                    isActive ? activeClass : 'bg-white border-slate-200 text-slate-600'
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    {option.icon}
-                    <p className="text-sm font-semibold">
-                      {option.label}
-                    </p>
-                  </div>
-                  <p className={clsx('text-xs', isActive ? 'text-white/90' : 'text-slate-500')}>
-                    {option.description}
-                  </p>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        </>
       )
     }
 
@@ -799,12 +943,18 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       </>
     )
   }
-  const statusBadge = selectedHome
-    ? isOpenToTalking
-      ? { label: 'Open to talking', classes: 'bg-[#007C7C]/10 text-[#007C7C]' }
-      : selectedHome.is_claimed
-        ? { label: 'Claimed', classes: 'bg-orange-100 text-orange-800' }
-        : { label: 'Unclaimed', classes: 'bg-slate-100 text-slate-700' }
+  // Primary Badge: Mirrors Map Pin Priority Exactly
+  // Sale > Rent > Open > Claimed > Unclaimed
+  const primaryBadge = selectedHome
+    ? localForSale
+      ? { label: 'For Sale', classes: 'bg-rose-100 text-rose-700' }
+      : localForRent
+        ? { label: 'For Rent', classes: 'bg-indigo-100 text-indigo-700' }
+        : isOpenToTalking
+          ? { label: 'Open to Talking', classes: 'bg-[#007C7C]/10 text-[#007C7C]' }
+          : selectedHome.is_claimed || claimRecord?.property_id === selectedHome.id
+            ? { label: 'Claimed', classes: 'bg-amber-100 text-amber-700' }
+            : { label: 'Unclaimed', classes: 'bg-slate-100 text-slate-600' }
     : null
   const effectiveIntentFlags = computeIntentFlags()
   const messageCtaMode: MessageMode = effectiveIntentFlags.sale || effectiveIntentFlags.rent || effectiveIntentFlags.open ? 'direct' : 'note'
@@ -824,7 +974,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   }, [currentUser?.id])
 
   const selectedHomeTitle = selectedHome
-    ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''}`.trim() ||
+    ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''} `.trim() ||
       selectedHome?.name ||
       'Home')
     : ''
@@ -837,11 +987,13 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     if (!selectedHome) {
       setLocalForSale(false)
       setLocalForRent(false)
+      setIsOpenToTalking(false) // Ensure this is reset
       setIntentForId(null)
       return
     }
     setLocalForSale(!!selectedHome.is_for_sale)
     setLocalForRent(!!selectedHome.is_for_rent)
+    setIsOpenToTalking(!!selectedHome.is_open_to_talking) // Sync this too
     setIntentForId(selectedHome.id)
   }, [selectedHome?.id])
 
@@ -966,7 +1118,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       if (!target) return
 
       setSelectedHome(target)
-      mapRef.current?.flyTo([target.lat, target.lon], 18)
+      mapRef.current?.flyTo([target.lat, target.lon], 16, { animate: true, duration: 1 })
       if (openInbox) setIsInboxOpen(true)
 
       deepLinkHandledRef.current = propertyId
@@ -976,7 +1128,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         url.searchParams.delete('propertyId')
         url.searchParams.delete('openInbox')
         const nextSearch = url.searchParams.toString()
-        window.history.replaceState(null, '', nextSearch ? `${url.pathname}?${nextSearch}` : url.pathname)
+        window.history.replaceState(null, '', nextSearch ? `${url.pathname}?${nextSearch} ` : url.pathname)
       }
     }
 
@@ -1157,6 +1309,38 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         userId={currentUser?.id}
         isOpen={isActivityOpen}
         onClose={() => setIsActivityOpen(false)}
+        onFlyToProperty={(lat, lon, propertyId) => {
+          // Explicitly close drawer to avoid race conditions
+          setIsActivityOpen(false)
+
+          const existingProp = shops.find(s => s.id === propertyId)
+          if (existingProp) {
+            handleShopClick(existingProp)
+          } else {
+            // Fetch and fly
+            supabase
+              .from('property_public_view')
+              .select('*')
+              .eq('id', propertyId)
+              .single()
+              .then(({ data, error }) => {
+                if (!error && data) {
+                  // Ensure numeric types and constructed object matches MapProperty
+                  const row = data as any
+                  const prop: MapProperty = {
+                    ...row,
+                    lat: Number(row.lat),
+                    lon: Number(row.lon),
+                    input_source: row.input_source ?? 'user',
+                    created_at: row.created_at ?? new Date().toISOString()
+                  } as unknown as MapProperty
+
+                  setShops(prev => prev.some(p => p.id === prop.id) ? prev : [...prev, prop])
+                  handleShopClick(prop)
+                }
+              })
+          }
+        }}
       />
 
 
@@ -1185,6 +1369,34 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
             currentZoom={mapZoom}
             className="pointer-events-auto"
             onLocationSelect={handleLocationSelect}
+            onFlyToProperty={(lat, lon, propertyId) => {
+              const existingProp = shops.find(s => s.id === propertyId)
+              if (existingProp) {
+                handleShopClick(existingProp)
+              } else {
+                // Fetch and fly
+                supabase
+                  .from('property_public_view')
+                  .select('*')
+                  .eq('id', propertyId)
+                  .single()
+                  .then(({ data, error }) => {
+                    if (!error && data) {
+                      const row = data as any
+                      const prop: MapProperty = {
+                        ...row,
+                        lat: Number(row.lat),
+                        lon: Number(row.lon),
+                        input_source: row.input_source ?? 'user',
+                        created_at: row.created_at ?? new Date().toISOString()
+                      } as unknown as MapProperty
+
+                      setShops(prev => prev.some(p => p.id === prop.id) ? prev : [...prev, prop])
+                      handleShopClick(prop)
+                    }
+                  })
+              }
+            }}
           />
         </div>
       }
@@ -1204,10 +1416,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
             className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/40 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[1050] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
           >
             {/* Hero */}
-            <div className="relative h-64 w-full bg-slate-100 group">
+            <div className="relative h-48 w-full bg-slate-100 group">
               <div className="absolute top-3 right-3 z-20 flex items-center gap-3">
                 <FollowButton
                   propertyId={selectedHome.id}
+                  isFollowed={followedIds.includes(selectedHome.id)}
                   initialIsFollowed={followedIds.includes(selectedHome.id)}
                   onToggleSuccess={(isNowFollowed) => {
                     setFollowedIds((prev) => {
@@ -1227,36 +1440,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                   &times;
                 </button>
               </div>
-              {/* Admin Edit Controls Header */}
-              {isAdmin && selectedHome && (
-                <div className="absolute top-3 left-3 z-20">
-                  <button
-                    onClick={() => {
-                      if (adminEditMode) {
-                        setAdminEditMode(false)
-                        setAdminEditData(null)
-                      } else {
-                        setAdminEditMode(true)
-                        setAdminEditData({
-                          house_number: selectedHome.house_number,
-                          street: selectedHome.street,
-                          postcode: selectedHome.postcode,
-                          price_estimate: selectedHome.price_estimate,
-                          lat: selectedHome.lat,
-                          lon: selectedHome.lon
-                        })
-                      }
-                    }}
-                    className="inline-flex h-9 px-3 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow hover:bg-white font-semibold text-xs gap-1"
-                  >
-                    {adminEditMode ? <><X size={14} /> Cancel Edit</> : <><Edit2 size={14} /> Admin Edit</>}
-                  </button>
-                </div>
-              )}
+
 
               {/* Progressive Delight Hero Image */}
               {(() => {
-                const hasPhoto = heroImage || (selectedHome as any)?.image_url
+                const hasPhoto = heroImage || (selectedHome as any)?.image_url || (selectedHome as any)?.market_image_url
                 const isClaimed = selectedHome?.is_claimed
                 const canUpload = isClaimedByYou
 
@@ -1278,8 +1466,8 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                     <>
                       {fileInput}
                       <img
-                        src={heroImage || (selectedHome as any)?.image_url}
-                        className={`w-full h-full object-cover ${canUpload ? 'cursor-pointer' : ''}`}
+                        src={heroImage || (selectedHome as any)?.image_url || (selectedHome as any)?.market_image_url}
+                        className={`w-full h-full object-cover ${canUpload ? 'cursor-pointer' : ''} `}
                         alt="Home"
                         onClick={() => canUpload && heroFileInputRef.current?.click()}
                       />
@@ -1305,7 +1493,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                     <>
                       {fileInput}
                       <div
-                        className={`w-full h-full flex flex-col items-center justify-center ${gradientClass} ${canUpload ? 'cursor-pointer' : ''}`}
+                        className={`w-full h-full flex flex-col items-center justify-center ${gradientClass} ${canUpload ? 'cursor-pointer' : ''} `}
                         onClick={() => canUpload && heroFileInputRef.current?.click()}
                       >
                         <Camera className="text-white/70" size={36} />
@@ -1463,13 +1651,15 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                   <div className="h-5 w-32 bg-slate-200 rounded animate-pulse"></div>
                 ) : (
                   <>
-                    {statusBadge && (
-                      <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${statusBadge.classes}`}>
-                        {statusBadge.label}
+                    {/* Primary Badge: Mirrors Map Pin Signal */}
+                    {primaryBadge && (
+                      <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${primaryBadge.classes}`}>
+                        {primaryBadge.label}
                       </span>
                     )}
-                    {claimRecord && claimRecord.property_id === selectedHome.id && isClaimedByYou && (
-                      <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700">
+                    {/* Secondary: Claimed by you indicator */}
+                    {isClaimedByYou && (
+                      <span className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">
                         Claimed by you
                       </span>
                     )}
@@ -1582,6 +1772,16 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           propertyId={selectedHome.id}
           userId={currentUser?.id}
         />
+      )}
+
+      {/* Claim Toast */}
+      {claimToast && (
+        <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
+          <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2">
+            <span className="text-xl">🏠</span>
+            <span className="font-semibold">{claimToast}</span>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -157,9 +157,9 @@ export default function MessageModal({ isOpen, onClose, selectedHome, currentUse
 
     return (
         <>
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
-                <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-                    <div className="flex items-start justify-between border-b border-slate-200 p-4">
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/20 backdrop-blur-sm px-4">
+                <div className="w-full max-w-md rounded-2xl bg-white/50 backdrop-blur-md border border-white/40 shadow-2xl">
+                    <div className="flex items-start justify-between border-b border-slate-200/50 p-4">
                         <div>
                             <h3 className="text-lg font-semibold text-slate-900">{messageHeader}</h3>
                             {messageSubtext && (

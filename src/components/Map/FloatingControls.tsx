@@ -205,7 +205,7 @@ export default function FloatingControls({
       {/* 1. TOP CENTER SEARCH PILL - GLASSMORPHISM */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-[1000] pointer-events-auto">
         <div className="relative">
-          <div className="flex items-center gap-3 w-full bg-white/95 backdrop-blur-md shadow-xl rounded-full px-4 py-3 border border-white/50 transition-shadow focus-within:ring-2 focus-within:ring-white/50 ring-1 ring-black/5">
+          <div className="flex items-center gap-3 w-full bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl rounded-full px-4 py-3 border border-white/40 shadow-black/10 transition-shadow focus-within:ring-2 focus-within:ring-white/50 ring-1 ring-black/5">
             {onToggleList && (
               <button
                 type="button"
@@ -239,7 +239,7 @@ export default function FloatingControls({
 
           {/* Suggestions Dropdown */}
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-3 rounded-3xl bg-white/90 backdrop-blur-xl shadow-2xl border border-white/50 p-2 z-[101] overflow-hidden">
+            <div className="absolute top-full left-0 right-0 mt-3 rounded-3xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl border border-white/40 shadow-black/10 p-2 z-[101] overflow-hidden ring-1 ring-black/5">
               {suggestions.map((item, idx) => (
                 <button
                   key={`${item.display_name}-${idx}`}
@@ -275,14 +275,14 @@ export default function FloatingControls({
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setMenuOpen((prev) => !prev)}
-                className="h-12 w-12 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-xl text-slate-900 font-bold shadow-xl border border-white/50 hover:scale-110 transition-all ring-1 ring-black/5 text-lg"
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="flex items-center gap-2 bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl rounded-full px-3 py-1.5 border border-white/40 shadow-black/10 hover:bg-white/60 transition-all ring-1 ring-black/5"
                 aria-label="User Menu"
               >
                 {emailInitial}
               </button>
               {menuOpen && (
-                <div className="absolute right-0 mt-3 w-64 rounded-3xl bg-white/90 backdrop-blur-xl shadow-2xl border border-white/50 p-2 animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right ring-1 ring-black/5">
+                <div className="absolute right-0 mt-3 w-64 rounded-3xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl border border-white/40 shadow-black/10 p-2 animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right ring-1 ring-black/5">
                   <div className="text-xs font-bold text-slate-400 px-4 py-3 uppercase tracking-wider truncate">
                     {currentUser.email}
                   </div>
@@ -371,7 +371,7 @@ export default function FloatingControls({
 
         {/* Layer Menu Popover (Compact, Left of Button) */}
         {showLayerMenu && layers && (
-          <div className="absolute right-14 bottom-24 p-2 rounded-2xl bg-white/95 backdrop-blur-md border border-white/50 shadow-xl w-48 animate-in fade-in slide-in-from-right-2 duration-200 ring-1 ring-black/5 flex flex-col gap-1">
+          <div className="absolute right-14 bottom-24 p-2 rounded-2xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 w-48 animate-in fade-in slide-in-from-right-2 duration-200 ring-1 ring-black/5 flex flex-col gap-1">
             {/* Buzz */}
             <button
               onClick={() => handleToggleLayer('heat')}
@@ -423,7 +423,7 @@ export default function FloatingControls({
 
         {/* Legend Card (Slide-out) */}
         {showLegend && (
-          <div className="absolute right-14 bottom-14 p-4 rounded-3xl bg-white/95 backdrop-blur-md border border-white/50 shadow-2xl w-56 animate-in fade-in slide-in-from-right-4 duration-300 ring-1 ring-black/5">
+          <div className="absolute right-14 bottom-14 p-4 rounded-3xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 w-56 animate-in fade-in slide-in-from-right-4 duration-300 ring-1 ring-black/5">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Signal Guide</h4>
             </div>
@@ -460,9 +460,9 @@ export default function FloatingControls({
             setShowLayerMenu(prev => !prev);
             if (showLegend) onToggleLegend?.(); // Auto close legend if layers open
           }}
-          className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl border border-white/50 ${showLayerMenu
+          className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl shadow-black/10 border border-white/40 ${showLayerMenu
             ? "bg-slate-800 text-white"
-            : "bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 hover:scale-105"
+            : "bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 hover:scale-105"
             }`}
           title="Layers"
         >
@@ -475,9 +475,9 @@ export default function FloatingControls({
             onToggleLegend?.();
             setShowLayerMenu(false); // Auto close layers if legend open
           }}
-          className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl border border-white/50 ${showLegend
+          className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl shadow-black/10 border border-white/40 ${showLegend
             ? "bg-slate-800 text-white"
-            : "bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 hover:scale-105"
+            : "bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 hover:scale-105"
             }`}
           title="Legend"
         >
@@ -488,7 +488,7 @@ export default function FloatingControls({
         {onLocateMe && (
           <button
             onClick={onLocateMe}
-            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 shadow-xl border border-white/50 hover:scale-105 transition-all"
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 shadow-xl shadow-black/10 border border-white/40 hover:scale-105 transition-all"
             title="Locate Me"
           >
             <Locate size={20} />
@@ -498,7 +498,7 @@ export default function FloatingControls({
         {/* Zoom In */}
         <button
           onClick={onZoomIn}
-          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 shadow-xl border border-white/50 hover:scale-105 transition-all"
+          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 shadow-xl shadow-black/10 border border-white/40 hover:scale-105 transition-all"
           title="Zoom In"
         >
           <Plus size={20} />
@@ -507,7 +507,7 @@ export default function FloatingControls({
         {/* Zoom Out */}
         <button
           onClick={onZoomOut}
-          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/95 backdrop-blur-md text-slate-600 hover:text-slate-900 shadow-xl border border-white/50 hover:scale-105 transition-all"
+          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 shadow-xl shadow-black/10 border border-white/40 hover:scale-105 transition-all"
           title="Zoom Out"
         >
           <Minus size={20} />

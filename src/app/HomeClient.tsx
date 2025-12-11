@@ -29,6 +29,13 @@ import FlagModal from '@/components/UI/FlagModal'
 import { useConfetti } from '@/hooks/useConfetti'
 import { calculateProfileStrength } from '@/lib/profileLogic'
 import HomeStoryDisplay from '@/components/Shop/HomeStoryDisplay'
+import { AnimatePresence } from 'framer-motion'
+import SmallCard from '@/components/Shop/Property/SmallCard'
+import ExpandedCard from '@/components/Shop/Property/ExpandedCard'
+
+
+// Feature flag for new Elastic Shopfront
+const USE_ELASTIC_SHOPFRONT = true
 
 
 
@@ -68,6 +75,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const [showLegend, setShowLegend] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
   const [selectedHome, setSelectedHome] = useState<MapProperty | null>(null)
+  const [isExpanded, setIsExpanded] = useState(false) // New State for Card Expansion
   const [claimRecord, setClaimRecord] = useState<Database['public']['Tables']['property_claims']['Row'] | null>(null)
   const [claiming, setClaiming] = useState(false)
   const [claimError, setClaimError] = useState<string | null>(null)
@@ -691,8 +699,27 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   }
 
   const handleSetOwnerStatus = async (nextStatus: 'settled' | 'open' | 'sale' | 'rent') => {
-    if (!selectedHome || !currentUser) return
-    if (!claimRecord || claimRecord.property_id !== selectedHome.id || claimRecord.user_id !== currentUser.id) return
+    console.log('[handleSetOwnerStatus] Called with:', {
+      nextStatus,
+      selectedHome: selectedHome?.id,
+      currentUser: currentUser?.id,
+      claimRecord: claimRecord ? { property_id: claimRecord.property_id, user_id: claimRecord.user_id } : null
+    })
+
+    if (!selectedHome || !currentUser) {
+      console.log('[handleSetOwnerStatus] BLOCKED: No selectedHome or currentUser')
+      return
+    }
+    if (!claimRecord || claimRecord.property_id !== selectedHome.id || claimRecord.user_id !== currentUser.id) {
+      console.log('[handleSetOwnerStatus] BLOCKED: claimRecord guard failed', {
+        hasClaimRecord: !!claimRecord,
+        propertyMatch: claimRecord?.property_id === selectedHome.id,
+        userMatch: claimRecord?.user_id === currentUser.id
+      })
+      return
+    }
+
+    console.log('[handleSetOwnerStatus] PASSED guards, proceeding...')
 
     setHasInteracted(true) // Mark as interacted!
 
@@ -700,7 +727,12 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     const prevSale = localForSale
     const prevRent = localForRent
 
-    const nextSoft = nextStatus === 'open' || nextStatus === 'sale' || nextStatus === 'rent'
+    // FIX: Each status is MUTUALLY EXCLUSIVE
+    // - Settled: all false
+    // - Open: only is_open_to_talking = true
+    // - Sale: only is_for_sale = true
+    // - Rent: only is_for_rent = true
+    const nextSoft = nextStatus === 'open'  // ONLY true for 'open', not sale/rent
     const nextSale = nextStatus === 'sale'
     const nextRent = nextStatus === 'rent'
 
@@ -757,10 +789,16 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       )
     )
 
+    // CRITICAL: Also update selectedHome so PropertyCard re-renders with new intent values
+    setSelectedHome((prev) =>
+      prev ? { ...prev, is_open_to_talking: nextSoft, is_for_sale: nextSale, is_for_rent: nextRent } : prev
+    )
+
     // Bump refresh signal so the map fetches latest flags
     setMapRefreshSignal((s) => s + 1)
 
     setSoftListingSaving(false)
+    console.log('[handleSetOwnerStatus] COMPLETED - State updated')
   }
 
   // Story Save logic moved to HomeStorySection
@@ -786,6 +824,72 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         : 'settled'
 
   /* const effectiveIntentFlags = computeIntentFlags() */
+
+  // Handle Intent Change from PropertyCard
+  const handleIntentChange = async (key: string, value: boolean) => {
+    console.log('[IntentChange] Called with:', { key, value, claimRecord, selectedHome: selectedHome?.id, currentUser: currentUser?.id })
+
+    if (key === 'settled' && value) {
+      console.log('[IntentChange] -> handleSetOwnerStatus(settled)')
+      await handleSetOwnerStatus('settled')
+      return
+    }
+
+    if (!value) {
+      console.log('[IntentChange] -> handleSetOwnerStatus(settled) [toggle off]')
+      await handleSetOwnerStatus('settled')
+    } else {
+      if (key === 'open_to_talking') {
+        console.log('[IntentChange] -> handleSetOwnerStatus(open)')
+        await handleSetOwnerStatus('open')
+      }
+      if (key === 'for_sale') {
+        console.log('[IntentChange] -> handleSetOwnerStatus(sale)')
+        await handleSetOwnerStatus('sale')
+      }
+      if (key === 'for_rent') {
+        console.log('[IntentChange] -> handleSetOwnerStatus(rent)')
+        await handleSetOwnerStatus('rent')
+      }
+    }
+  }
+
+  const handleLeaveNote = () => {
+    setMessageModalMode('note')
+    setIsMessageModalOpen(true)
+  }
+
+  const handlePhotoUploadAdapter = async (file: File) => {
+    if (!selectedHome || !currentUser) return
+    setHeroUploading(true)
+    try {
+      const urls = await uploadHomeStoryImages(supabase, selectedHome.id, [file])
+
+      const { data: existing } = await supabase
+        .from('home_story')
+        .select('images')
+        .eq('property_id', selectedHome.id)
+        .maybeSingle()
+
+      const existingImages = (existing?.images as string[]) || []
+      const newImages = [...existingImages, ...urls]
+
+      await supabase
+        .from('home_story')
+        .upsert({
+          property_id: selectedHome.id,
+          user_id: currentUser.id,
+          images: newImages,
+        }, { onConflict: 'property_id' })
+
+      setHeroImage(newImages[0])
+    } catch (error) {
+      console.error('Hero upload failed:', error)
+      alert('Failed to upload photo')
+    } finally {
+      setHeroUploading(false)
+    }
+  }
 
   const renderOwnershipControls = () => {
     if (claimRecord && claimRecord.property_id === selectedHome?.id && claimRecord.user_id === currentUserId) {
@@ -1411,7 +1515,37 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       />
 
       {
-        selectedHome && (
+        selectedHome && USE_ELASTIC_SHOPFRONT && (
+          <div className="z-[1050]">
+            <AnimatePresence>
+              {!isExpanded && (
+                <SmallCard
+                  key="small-card"
+                  property={selectedHome!}
+                  onExpand={() => setIsExpanded(true)}
+                  onClose={() => setSelectedHome(null)}
+                />
+              )}
+              {isExpanded && (
+                <ExpandedCard
+                  key="expanded-card"
+                  property={selectedHome!}
+                  onClose={() => {
+                    setIsExpanded(false)
+                    setSelectedHome(null)
+                  }}
+                  onBack={() => setIsExpanded(false)}
+                  onClaim={handleClaimHome}
+                  onSelectNeighbor={setSelectedHome}
+                />
+              )}
+            </AnimatePresence>
+          </div>
+        )
+      }
+
+      {
+        selectedHome && !USE_ELASTIC_SHOPFRONT && (
           <div
             className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/40 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[1050] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
           >

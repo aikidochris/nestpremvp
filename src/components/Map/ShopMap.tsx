@@ -516,9 +516,12 @@ export default function ShopMap({
     const override = intentOverrides[property.id]
     const merged = override ? { ...property, ...override } : property
     const isOwner = !!currentUserId && merged.claimed_by_user_id === currentUserId
-    const isSale = merged.signals?.is_for_sale ?? merged.is_for_sale
-    const isRent = merged.signals?.is_for_rent ?? merged.is_for_rent
-    const isOpen = merged.signals?.soft_listing ?? merged.is_open_to_talking
+
+    // Priority: Override values > Direct property values > Signals
+    // (Overrides are already merged above)
+    const isSale = merged.is_for_sale ?? merged.signals?.is_for_sale ?? false
+    const isRent = merged.is_for_rent ?? merged.signals?.is_for_rent ?? false
+    const isOpen = merged.is_open_to_talking ?? merged.signals?.soft_listing ?? false
     const isClaimed = merged.is_claimed
 
     // TRAFFIC LIGHT SYSTEM
@@ -621,21 +624,6 @@ export default function ShopMap({
           }
         }}
       >
-        <Popup>
-          <div className="p-3 min-w-[220px]">
-            <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
-            <p className="text-sm text-stone-600 mb-3">{address}</p>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onShopClick?.(displayProperty)
-              }}
-              className="w-full px-3 py-1.5 bg-[#007C7C] text-white rounded-full hover:bg-[#006868] text-sm font-medium transition-colors"
-            >
-              View home
-            </button>
-          </div>
-        </Popup>
       </Marker>
     )
   }
@@ -673,21 +661,6 @@ export default function ShopMap({
             }
           }}
         >
-          <Popup>
-            <div className="p-3 min-w-[220px]">
-              <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
-              <p className="text-sm text-stone-600 mb-3">{address}</p>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onShopClick?.(displayProperty)
-                }}
-                className="w-full px-3 py-1.5 bg-[#007C7C] text-white rounded-full hover:bg-[#006868] text-sm font-medium transition-colors"
-              >
-                View home
-              </button>
-            </div>
-          </Popup>
         </Marker>
       )
     })

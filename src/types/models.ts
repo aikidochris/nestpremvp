@@ -5,6 +5,7 @@ export interface MapProperty {
     postcode: string | null
     street: string | null
     house_number: string | null
+    display_label?: string | null
     name?: string | null
     lat: number
     lon: number

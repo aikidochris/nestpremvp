@@ -65,6 +65,38 @@ export type Database = {
         }
         Relationships: []
       }
+      album_shares: {
+        Row: {
+          album_type: string
+          id: string
+          revoked_at: string | null
+          shared_at: string | null
+          thread_id: string
+        }
+        Insert: {
+          album_type: string
+          id?: string
+          revoked_at?: string | null
+          shared_at?: string | null
+          thread_id: string
+        }
+        Update: {
+          album_type?: string
+          id?: string
+          revoked_at?: string | null
+          shared_at?: string | null
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "album_shares_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "message_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       analytics_events: {
         Row: {
           created_at: string
@@ -236,6 +268,7 @@ export type Database = {
       home_story: {
         Row: {
           created_at: string
+          highlights: string[] | null
           id: string
           images: string[] | null
           property_id: string
@@ -244,6 +277,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          highlights?: string[] | null
           id?: string
           images?: string[] | null
           property_id: string
@@ -252,6 +286,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          highlights?: string[] | null
           id?: string
           images?: string[] | null
           property_id?: string
@@ -334,6 +369,58 @@ export type Database = {
           },
         ]
       }
+      message_threads: {
+        Row: {
+          buyer_id: string
+          created_at: string | null
+          id: string
+          last_message_at: string | null
+          owner_id: string
+          property_id: string
+          state: string | null
+        }
+        Insert: {
+          buyer_id: string
+          created_at?: string | null
+          id?: string
+          last_message_at?: string | null
+          owner_id: string
+          property_id: string
+          state?: string | null
+        }
+        Update: {
+          buyer_id?: string
+          created_at?: string | null
+          id?: string
+          last_message_at?: string | null
+          owner_id?: string
+          property_id?: string
+          state?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_threads_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_threads_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_threads_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["property_id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           body: string | null
@@ -386,6 +473,76 @@ export type Database = {
           {
             foreignKeyName: "messages_property_id_fkey"
             columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["property_id"]
+          },
+        ]
+      }
+      neighbour_routing: {
+        Row: {
+          created_at: string | null
+          from_property_id: string
+          id: string
+          message_id: string | null
+          sender_id: string
+          to_property_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          from_property_id: string
+          id?: string
+          message_id?: string | null
+          sender_id: string
+          to_property_id: string
+        }
+        Update: {
+          created_at?: string | null
+          from_property_id?: string
+          id?: string
+          message_id?: string | null
+          sender_id?: string
+          to_property_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "neighbour_routing_from_property_id_fkey"
+            columns: ["from_property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "neighbour_routing_from_property_id_fkey"
+            columns: ["from_property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "neighbour_routing_from_property_id_fkey"
+            columns: ["from_property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["property_id"]
+          },
+          {
+            foreignKeyName: "neighbour_routing_to_property_id_fkey"
+            columns: ["to_property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "neighbour_routing_to_property_id_fkey"
+            columns: ["to_property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "neighbour_routing_to_property_id_fkey"
+            columns: ["to_property_id"]
             isOneToOne: false
             referencedRelation: "property_public_view"
             referencedColumns: ["property_id"]
@@ -652,6 +809,49 @@ export type Database = {
           },
         ]
       }
+      property_endorsements: {
+        Row: {
+          created_at: string | null
+          id: string
+          property_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          property_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          property_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_endorsements_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_endorsements_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_endorsements_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["property_id"]
+          },
+        ]
+      }
       property_flags: {
         Row: {
           created_at: string | null
@@ -849,6 +1049,58 @@ export type Database = {
           srtext?: string | null
         }
         Relationships: []
+      }
+      unclaimed_notes: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_read: boolean | null
+          is_revealed: boolean | null
+          message: string
+          property_id: string
+          sender_user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          is_revealed?: boolean | null
+          message: string
+          property_id: string
+          sender_user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          is_revealed?: boolean | null
+          message?: string
+          property_id?: string
+          sender_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "unclaimed_notes_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unclaimed_notes_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unclaimed_notes_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "property_public_view"
+            referencedColumns: ["property_id"]
+          },
+        ]
       }
     }
     Views: {
@@ -1094,6 +1346,10 @@ export type Database = {
         Args: { property_id: string; update_data: Json }
         Returns: undefined
       }
+      can_vouch_for_property: {
+        Args: { target_property_id: string }
+        Returns: boolean
+      }
       disablelongtransactions: { Args: never; Returns: string }
       dropgeometrycolumn:
         | {
@@ -1247,6 +1503,10 @@ export type Database = {
       }
       get_admin_export_data: { Args: { export_type: string }; Returns: Json }
       get_admin_stats: { Args: never; Returns: Json }
+      get_endorsement_count: {
+        Args: { target_property_id: string }
+        Returns: number
+      }
       get_heatmap_points: {
         Args: {
           east: number

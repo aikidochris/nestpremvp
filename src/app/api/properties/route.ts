@@ -37,6 +37,7 @@ export async function GET(req: Request) {
         epc_floor_area,
         epc_property_type,
         is_claimed,
+        claimed_by_user_id,
         is_open_to_talking,
         is_for_sale,
         is_for_rent

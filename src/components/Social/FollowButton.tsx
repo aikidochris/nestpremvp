@@ -21,6 +21,7 @@ export default function FollowButton({
   isCompact = false,
   isFollowed: controlledIsFollowed,
   onToggleFollow,
+  onToggleSuccess,
 }: FollowButtonProps) {
   const isControlled = controlledIsFollowed !== undefined
   const [internalFollowed, setInternalFollowed] = useState(initialIsFollowed)
@@ -50,7 +51,7 @@ export default function FollowButton({
     const next = !currentFollowed
     setInternalFollowed(next)
 
-    const result = await togglePropertyFollow(propertyId, !next)
+    const result = await togglePropertyFollow(propertyId, currentFollowed)
     if (!result?.success) {
       setInternalFollowed(!next) // revert on failure
     } else {
@@ -61,17 +62,14 @@ export default function FollowButton({
     setIsAnimating(false)
   }
 
-  const baseClasses = `group relative flex items-center justify-center transition-all duration-200 ease-out ${
-    isCompact ? 'p-2' : 'p-3 rounded-full bg-white/80 backdrop-blur-md shadow-sm hover:bg-white hover:scale-105 active:scale-95'
-  }`
+  const baseClasses = `group relative flex items-center justify-center transition-all duration-200 ease-out ${isCompact ? 'p-2' : 'p-3 rounded-full bg-white/80 backdrop-blur-md shadow-sm hover:bg-white hover:scale-105 active:scale-95'
+    }`
 
-  const heartClassNames = `h-5 w-5 transition-colors duration-150 ${
-    isAnimating ? 'animate-pulse-scale' : ''
-  } ${
-    currentFollowed
+  const heartClassNames = `h-5 w-5 transition-colors duration-150 ${isAnimating ? 'animate-pulse-scale' : ''
+    } ${currentFollowed
       ? 'fill-[#007C7C] stroke-[#007C7C]'
       : 'fill-transparent stroke-slate-600 group-hover:stroke-[#007C7C]'
-  }`.trim()
+    }`.trim()
 
   return (
     <button

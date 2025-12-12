@@ -3,23 +3,39 @@
 import clsx from 'clsx'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState, useCallback, useEffect, useMemo, type ChangeEvent, useRef } from 'react'
-import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Flame, Share2, Edit2, MapPin, Save, X } from 'lucide-react'
+import { MessageCircle, Home as HomeIcon, Tag, Building2, Camera, ChevronLeft, ChevronRight, Plus, Trash2, Star, StarOff, Bell, FileText, Edit2, MapPin, Save, X } from 'lucide-react'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import ShopMap from '@/components/Map/MapWrapper'
-import LayerToggle, { LayerState } from '@/components/Map/LayerToggle'
 import ActivityFeedDrawer from '@/components/Feed/ActivityFeedDrawer'
 import type L from 'leaflet'
 import { uploadHomeStoryImages } from '@/lib/storage'
-import type { MapProperty } from '@/components/Map/ShopMap'
+import type { MapProperty } from '@/types/models'
+import type { Database } from '../lib/database.types'
 import FloatingControls from '@/components/Map/FloatingControls'
-import MapLegend from '@/components/Map/MapLegend'
 import InboxModal from '@/components/Messaging/InboxModal'
 import { useInbox } from '@/hooks/useInbox'
 import FollowButton from '@/components/Social/FollowButton'
 import { usePropertyFollows } from '@/hooks/usePropertyFollows'
 import FilterModal, { FilterState } from '@/components/UI/FilterModal'
-import AreaInsightsPanel from '@/components/Map/AreaInsightsPanel'
+import AreaPulsePanel from '@/components/Map/AreaPulsePanel'
 import PropertyInsights from '@/components/Shop/PropertyInsights'
+import { useProperties } from '@/hooks/useProperties'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
+import HomeStorySection from '@/components/Shop/HomeStorySection'
+import MessageModal from '@/components/Messaging/MessageModal'
+import OwnerChecklist from '@/components/Shop/OwnerChecklist'
+import HomeFactsEditor from '@/components/Shop/HomeFactsEditor'
+import FlagModal from '@/components/UI/FlagModal'
+import { useConfetti } from '@/hooks/useConfetti'
+import { calculateProfileStrength } from '@/lib/profileLogic'
+import HomeStoryDisplay from '@/components/Shop/HomeStoryDisplay'
+import { AnimatePresence } from 'framer-motion'
+import SmallCard from '@/components/Shop/Property/SmallCard'
+import ExpandedCard from '@/components/Shop/Property/ExpandedCard'
+
+
+// Feature flag for new Elastic Shopfront
+const USE_ELASTIC_SHOPFRONT = true
 
 
 
@@ -40,33 +56,31 @@ type OwnerStatus = 'settled' | 'open' | 'sale' | 'rent'
 type MessageMode = 'direct' | 'note' | 'future'
 
 export default function HomeClient({ shops: initialShops, user: _user, isAdmin, initialFollowedIds = [] }: HomeClientProps) {
-  console.log('[HomeClient] isAdmin prop:', isAdmin);
+
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
+  const { fireCelebration } = useConfetti()
   const enableGeolocation = false // keep code for future reintroduction
   const [searchQuery, setSearchQuery] = useState('')
-  const [shops, setShops] = useState<MapProperty[]>(initialShops)
+  const [claimToast, setClaimToast] = useState<string | null>(null)
+
+  // Hook Integration
+  const { shops, setShops, fetchProperties: fetchUserShops } = useProperties(initialShops)
+  const { currentUser, setCurrentUser } = useCurrentUser()
+
   const [followedIds, setFollowedIds] = useState<string[]>(initialFollowedIds)
   const [mapCenter, setMapCenter] = useState<[number, number]>([55.035, -1.470]) // Default to Shiremoor/Monkseaton for Pilot
+  const [mapZoom, setMapZoom] = useState<number>(13)
+  const [showLegend, setShowLegend] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
-  const [selectedHome, setSelectedHome] = useState<any | null>(null)
-  const [claimRecord, setClaimRecord] = useState<any | null>(null)
+  const [selectedHome, setSelectedHome] = useState<MapProperty | null>(null)
+  const [isExpanded, setIsExpanded] = useState(false) // New State for Card Expansion
+  const [claimRecord, setClaimRecord] = useState<Database['public']['Tables']['property_claims']['Row'] | null>(null)
   const [claiming, setClaiming] = useState(false)
   const [claimError, setClaimError] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<any | null>(null)
-  const [, setAuthLoading] = useState(true)
-  const [homeStory, setHomeStory] = useState<any | null>(null)
-  const [storyLoading, setStoryLoading] = useState(false)
-  const [storyError, setStoryError] = useState<string | null>(null)
-  const [storySummary, setStorySummary] = useState('')
-  const [storyImages, setStoryImages] = useState<string[]>([])
-  const [editingStory, setEditingStory] = useState(false)
-  const [savingStory, setSavingStory] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [newUploads, setNewUploads] = useState<{ url: string; file: File }[]>([])
-  const [imageOrder, setImageOrder] = useState<string[]>([])
-  const [storyForId, setStoryForId] = useState<string | null>(null)
+  // currentUser handled by hook
+
   const [isOpenToTalking, setIsOpenToTalking] = useState(false)
   const [isCheckingClaim, setIsCheckingClaim] = useState(false)
   const [softListingLoading, setSoftListingLoading] = useState(false)
@@ -81,6 +95,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     is_open_to_talking: boolean
     is_claimed: boolean
     claimed_by_user_id: string | null
+    status_confirmed: boolean // NEW: track explicit intent confirmation locally
   }>>>({})
   const [mapRefreshSignal, setMapRefreshSignal] = useState(0)
   const [mapReady, setMapReady] = useState(false)
@@ -91,16 +106,23 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const [adminEditData, setAdminEditData] = useState<any>(null)
   const [adminSaving, setAdminSaving] = useState(false)
 
+  // Hero Image State (Progressive Delight)
+  const [heroImage, setHeroImage] = useState<string | null>(null)
+  const [heroUploading, setHeroUploading] = useState(false)
+  const heroFileInputRef = useRef<HTMLInputElement | null>(null)
+  const statusSelectorRef = useRef<HTMLDivElement | null>(null)
 
-  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  // Graduation State
+  const [hasInteracted, setHasInteracted] = useState(false) // Track if user has touched controls this session
+  const [isEditingFacts, setIsEditingFacts] = useState(false) // For post-graduation editing logic
+
+
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
-  const [messageMode, setMessageMode] = useState<MessageMode>('direct')
-  const [messageHeader, setMessageHeader] = useState('Message Owner')
-  const [messageSubtext, setMessageSubtext] = useState<string | null>(null)
-  const [messageBody, setMessageBody] = useState('')
-  const [messageSending, setMessageSending] = useState(false)
-  const [messageError, setMessageError] = useState<string | null>(null)
-  const [messageSuccess, setMessageSuccess] = useState<string | null>(null)
+  const [messageModalMode, setMessageModalMode] = useState<MessageMode | undefined>(undefined)
+  const [isFlagModalOpen, setIsFlagModalOpen] = useState(false)
+
+  // Message state moved to MessageModal, we just track open state here
+
   const [pendingRequestCount, setPendingRequestCount] = useState<number>(0)
   const [pendingNotesOpen, setPendingNotesOpen] = useState(false)
   const [pendingNotes, setPendingNotes] = useState<any[]>([])
@@ -111,12 +133,19 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const [currentBounds, setCurrentBounds] = useState<L.LatLngBounds | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const mapMoveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // fetchDebounceRef removed as it is in useProperties
   const pendingDeepLinkRef = useRef<MapProperty | null>(null)
   const deepLinkHandledRef = useRef<string | null>(null)
   const lastPendingUserKeyRef = useRef<string | null>(null)
   const { isFollowed, toggleFollow } = usePropertyFollows()
   const [heatmapMode, setHeatmapMode] = useState<'all' | 'market' | 'social' | null>(null)
+
+  interface LayerState {
+    homes: boolean
+    heat: boolean
+    schools: boolean
+    transport: boolean
+  }
 
 
 
@@ -171,45 +200,12 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   })
 
   useEffect(() => {
-    let mounted = true
-
-    async function loadUser() {
-      setAuthLoading(true)
-      const { data, error } = await supabase.auth.getUser()
-      if (!mounted) return
-
-      if (!error) {
-        setCurrentUser(data.user ?? null)
-        if (data.user) {
-          refreshPendingRequestCount(data.user.id, undefined)
-        }
-      } else {
-        console.error('[Auth] getUser error', error)
-        setCurrentUser(null)
-      }
-      setAuthLoading(false)
+    if (currentUser) {
+      refreshPendingRequestCount(currentUser.id, undefined)
+    } else {
+      setPendingRequestCount(0)
     }
-
-    const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (!mounted) return
-        console.log('[Auth] onAuthStateChange', _event, session?.user?.email)
-        setCurrentUser(session?.user ?? null)
-        if (session?.user) {
-          refreshPendingRequestCount(session.user.id, undefined)
-        } else {
-          setPendingRequestCount(0)
-        }
-      }
-    )
-
-    loadUser()
-
-    return () => {
-      mounted = false
-      subscription?.subscription?.unsubscribe()
-    }
-  }, [refreshPendingRequestCount, supabase])
+  }, [currentUser, refreshPendingRequestCount])
 
   const calculateDistance = useCallback((lat1: number, lon1: number, lat2: number, lon2: number): number => {
     const R = 6371
@@ -222,56 +218,11 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     return R * c
   }, [])
 
-  const fetchUserShops = useCallback((center: [number, number], bounds?: L.LatLngBounds) => {
-    if (fetchDebounceRef.current) {
-      clearTimeout(fetchDebounceRef.current)
-    }
+  // fetchUserShops is now handled by useProperties hook
 
-    fetchDebounceRef.current = setTimeout(async () => {
-      try {
-        const params = new URLSearchParams()
-
-        if (bounds) {
-          const sw = bounds.getSouthWest()
-          const ne = bounds.getNorthEast()
-          params.set('south', sw.lat.toString())
-          params.set('west', sw.lng.toString())
-          params.set('north', ne.lat.toString())
-          params.set('east', ne.lng.toString())
-        } else {
-          const [lat, lon] = center
-          const radiusKm = 10
-          const deltaLat = radiusKm / 111
-          const deltaLon = radiusKm / (111 * Math.cos((lat * Math.PI) / 180) || 1)
-          params.set('south', (lat - deltaLat).toString())
-          params.set('north', (lat + deltaLat).toString())
-          params.set('west', (lon - deltaLon).toString())
-          params.set('east', (lon + deltaLon).toString())
-        }
-
-        const url = `/api/properties?${params.toString()}`
-        const response = await fetch(url)
-
-        const contentType = response.headers.get('content-type')
-        if (!contentType || !contentType.includes('application/json')) {
-          console.error('Received non-JSON response from API:', await response.text())
-          throw new Error('API returned invalid format')
-        }
-
-        const json = await response.json()
-        if (!response.ok) {
-          throw new Error(json?.error || response.statusText || 'Failed to fetch properties')
-        }
-
-        setShops(json?.data || [])
-      } catch (error) {
-        console.error('Error fetching properties:', error)
-      }
-    }, 500)
-  }, [])
-
-  const handleMapMove = useCallback((center: [number, number], bounds: L.LatLngBounds) => {
+  const handleMapMove = useCallback((center: [number, number], zoom: number, bounds: L.LatLngBounds) => {
     setMapCenter(center)
+    setMapZoom(zoom)
     setCurrentBounds((prev) => (prev && prev.equals(bounds) ? prev : bounds))
     fetchUserShops(center, bounds)
   }, [fetchUserShops])
@@ -300,26 +251,17 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     if (!selectedHome) {
       setClaimRecord(null)
       setClaimError(null)
-      setEditingStory(false)
       setIsOpenToTalking(false)
       setIsCheckingClaim(false)
       setSoftListingLoading(false)
       setSoftListingSaving(false)
       setSoftListingError(null)
-      setNewUploads([])
-      setImageOrder([])
-      setCurrentImageIndex(0)
-      setCurrentImageIndex(0)
+      setHasInteracted(false) // Reset interaction state
+      setIsEditingFacts(false) // Reset editing state
       setIsMessageModalOpen(false)
+      setMessageModalMode(undefined)
       setAdminEditMode(false)
       setAdminEditData(null)
-      setMessageBody('')
-      setMessageError(null)
-      setMessageMode('direct')
-      setMessageHeader('Message Owner')
-      setMessageSubtext(null)
-      setMessageSuccess(null)
-      setMessageSending(false)
       setIsInboxOpen(false)
       setPendingNotesOpen(false)
       setPendingNotes([])
@@ -338,7 +280,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       setClaimRecord(null)
       setIsCheckingClaim(true)
       setClaimError(null)
-      setEditingStory(false)
       setIsOpenToTalking(false)
       setSoftListingLoading(false)
       setSoftListingSaving(false)
@@ -347,7 +288,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       const { data, error } = await supabase
         .from('property_claims')
         .select('*')
-        .eq('property_id', selectedHome.id)
+        .eq('property_id', selectedHome!.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -377,68 +318,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     }
   }, [selectedHome?.id, supabase])
 
-  useEffect(() => {
-    if (!selectedHome) return
-
-    let cancelled = false
-
-    async function loadStory() {
-      setStoryLoading(true)
-      setStoryError(null)
-      setStoryForId(null)
-      setImageOrder([])
-      setStoryImages([])
-      setNewUploads([])
-      setCurrentImageIndex(0)
-      setStorySummary('')
-      setEditingStory(false)
-      setIsMessageModalOpen(false)
-      setMessageBody('')
-      setMessageError(null)
-      setPendingNotesOpen(false)
-      setPendingNotes([])
-      setPendingNotesError(null)
-
-      const currentRequestId = selectedHome.id
-
-      const { data, error } = await supabase
-        .from('home_story')
-        .select('*')
-        .eq('property_id', selectedHome.id)
-        .maybeSingle()
-
-      if (cancelled) {
-        setStoryLoading(false)
-        return
-      }
-
-      if (error) {
-        console.error('Error loading home story', error)
-        setHomeStory(null)
-        setStorySummary('')
-        setStoryImages([])
-        setImageOrder([])
-        setStoryError(error.message)
-      } else {
-        const storyData = data as any
-        setHomeStory(storyData ?? null)
-        setStorySummary(storyData?.summary_text ?? '')
-        setStoryImages((storyData?.images as string[]) ?? [])
-        setImageOrder((storyData?.images as string[]) ?? [])
-        setStoryForId(currentRequestId)
-        setCurrentImageIndex(0)
-        setNewUploads([])
-      }
-
-      setStoryLoading(false)
-    }
-
-    loadStory()
-
-    return () => {
-      cancelled = true
-    }
-  }, [selectedHome?.id, supabase])
+  // Story loading handled by HomeStorySection component
 
   useEffect(() => {
     const currentUserId = currentUser?.id
@@ -461,13 +341,13 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     async function loadSoftListing() {
       setSoftListingLoading(true)
       setSoftListingError(null)
-      const selectedHomeId = selectedHome.id
+      const selectedHomeId = selectedHome!.id
 
       const { data, error } = await supabase
         .from('intent_flags')
         .select('soft_listing,is_for_sale,is_for_rent')
-        .eq('property_id', selectedHome.id)
-        .eq('owner_id', currentUserId)
+        .eq('property_id', selectedHome!.id)
+        .eq('owner_id', currentUserId!)
         .maybeSingle()
 
       if (cancelled) return
@@ -491,6 +371,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           is_for_rent: nextRent,
           claimed_by_user_id: claimRecord?.user_id ?? selectedHome?.claimed_by_user_id ?? currentUserId ?? null,
           is_claimed: true,
+          status_confirmed: false // Initial load - status is NOT visually confirmed yet unless we tracked it in DB (we don't yet)
         })
         setShops((prev) =>
           prev.map((p) =>
@@ -530,7 +411,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           setIsLocating(false)
         },
         (error) => {
-          console.log('Geolocation error:', error.message, '- using default location')
+
           fetchUserShops(mapCenter)
           setIsLocating(false)
         },
@@ -555,8 +436,9 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       }
       mapMoveTimeoutRef.current = setTimeout(() => {
         const center = mapInstance.getCenter()
+        const zoom = mapInstance.getZoom()
         const bounds = mapInstance.getBounds()
-        handleMapMove([center.lat, center.lng], bounds)
+        handleMapMove([center.lat, center.lng], zoom, bounds)
       }, 250)
     }
 
@@ -607,6 +489,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     is_open_to_talking: boolean
     is_claimed: boolean
     claimed_by_user_id: string | null
+    status_confirmed: boolean
   }>) => {
     setIntentOverrides((prev) => ({
       ...prev,
@@ -651,155 +534,52 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
     if (!latestError) {
       setClaimRecord(latest ?? null)
+      
+      // 3. Fetch Unclaimed Notes (New Logic)
+      const { count: noteCount, error: noteError } = await supabase
+        .from('unclaimed_notes')
+        .select('*', { count: 'exact', head: true })
+        .eq('property_id', selectedHome.id)
+        .eq('status', 'pending')
+
+      // Immediately update selectedHome
+      setSelectedHome(prev => prev ? { 
+          ...prev, 
+          is_claimed: true, 
+          claimed_by_user_id: currentUser.id
+      } : prev)
+      
+      // Update Shops array
+      setShops(prev => prev.map(p => p.id === selectedHome.id ? { 
+          ...p, 
+          is_claimed: true, 
+          claimed_by_user_id: currentUser.id
+      } : p))
+
+      // 🎉 Celebration & Toast
+      fireCelebration()
+      
+      if (!noteError && noteCount && noteCount > 0) {
+           setClaimToast(`Claimed! You have ${noteCount} neighbor note${noteCount > 1 ? 's' : ''} waiting.`)
+      } else {
+           setClaimToast('Welcome Home! Your property is now claimed.')
+      }
+
+      setTimeout(() => setClaimToast(null), 5000)
     }
   }
 
-  const handleOpenMessageModal = async () => {
+  const handleOpenMessageModal = () => {
     if (!selectedHome) return
     if (!currentUser) {
       router.push('/auth/login?redirect=/')
       return
     }
-
-    const { sale, rent, open } = computeIntentFlags()
-    const nextMode: MessageMode = sale || rent || open ? 'direct' : 'note'
-    const header = nextMode === 'direct' ? 'Message Owner' : 'Leave an Interest Note'
-    const subtext = nextMode === 'note'
-      ? 'This owner isn\'t actively looking. We will let them know you are interested, but they may not reply immediately.'
-      : null
-
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-    const { count: sentCount, error: rateLimitError } = await (supabase as any)
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('sender_id', currentUser.id)
-      .gte('created_at', since)
-
-    if (rateLimitError) {
-      console.error('Error checking message rate limit', rateLimitError)
-      setMessageError('Could not start a new conversation right now.')
-      return
-    }
-
-    if ((sentCount ?? 0) >= 5) {
-      alert('You have reached your daily limit for starting new conversations.')
-      return
-    }
-
-    const { data: existingThread, error: existingThreadError } = await (supabase as any)
-      .from('messages')
-      .select('*')
-      .eq('sender_id', currentUser.id)
-      .eq('property_id', selectedHome.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (!existingThreadError && existingThread) {
-      const threadId = (existingThread as any)?.thread_id ?? (existingThread as any)?.conversation_id ?? existingThread.id
-      if (threadId) {
-        router.push(`/messages/${threadId}`)
-        return
-      }
-    } else if (existingThreadError) {
-      console.error('Error checking existing thread', existingThreadError)
-    }
-
-    setMessageMode(nextMode)
-    setMessageHeader(header)
-    setMessageSubtext(subtext)
-    setMessageBody('')
-    setMessageError(null)
+    setMessageModalMode(undefined) // Auto-detect
     setIsMessageModalOpen(true)
   }
 
-  const handleSendMessage = async () => {
-    if (!selectedHome || !currentUser) return
-    const body = messageBody.trim()
-    if (!body) {
-      setMessageError('Please enter a message.')
-      return
-    }
-    setMessageSending(true)
-    setMessageError(null)
-
-    try {
-      const status = messageMode === 'direct' ? 'unread' : 'pending_request'
-      const recipientId = messageMode === 'future' ? null : (claimRecord?.user_id ?? selectedHome.claimed_by_user_id ?? null)
-
-      await inboxSendMessage(selectedHome.id, body, recipientId ?? null, status)
-
-      setIsMessageModalOpen(false)
-      setMessageBody('')
-      setMessageMode('direct')
-      setMessageHeader('Message Owner')
-      setMessageSubtext(null)
-      if (messageMode === 'future') {
-        setMessageSuccess('Your note has been saved and will be delivered when the owner joins Nest.')
-        setTimeout(() => setMessageSuccess(null), 4000)
-      }
-    } catch (err: any) {
-      setMessageError(err.message ?? 'Failed to send message')
-    } finally {
-      setMessageSending(false)
-    }
-  }
-
-  const handleStoryFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    const selected = files ? Array.from(files) : []
-    if (!selected.length) return
-    const allowed = Math.max(0, 4 - imageOrder.length)
-    if (allowed <= 0) {
-      alert('You can upload up to 4 photos. Remove one to add another.')
-      return
-    }
-    const newFiles = selected.slice(0, allowed)
-    if (newFiles.length < selected.length) {
-      alert('Only the first 4 photos were added (max 4 total).')
-    }
-    const additions = newFiles.map((file) => ({ url: URL.createObjectURL(file), file }))
-    const additionUrls = additions.map((a) => a.url)
-    setNewUploads((prev) => {
-      const next = [...prev, ...additions]
-      return next
-    })
-    setImageOrder((prev) => [...prev, ...additionUrls])
-    setCurrentImageIndex(imageOrder.length) // jump to first new image
-    setEditingStory(true)
-  }
-
-  const handleDeleteImage = () => {
-    if (!displayImages.length) return
-    setEditingStory(true)
-    setImageOrder((prev) => {
-      const targetUrl = prev[currentImageIndex]
-      const nextOrder = prev.filter((_, idx) => idx !== currentImageIndex)
-      setStoryImages((imgs) => imgs.filter((img) => img !== targetUrl))
-      setNewUploads((uploads) => {
-        const nextUploads = uploads.filter((u) => u.url !== targetUrl)
-        return nextUploads
-      })
-      setCurrentImageIndex((idx) => {
-        const len = nextOrder.length
-        if (len === 0) return 0
-        return Math.min(idx, len - 1)
-      })
-      return nextOrder
-    })
-  }
-
-  const handleMakeMain = () => {
-    if (!displayImages.length || currentImageIndex === 0) return
-    setEditingStory(true)
-    setImageOrder((prev) => {
-      const next = [...prev]
-      const [item] = next.splice(currentImageIndex, 1)
-      next.unshift(item)
-      return next
-    })
-    setCurrentImageIndex(0)
-  }
+  // Image handlers moved to HomeStorySection
 
   const handleViewPendingNotes = async () => {
     if (!currentUser) return
@@ -883,15 +663,100 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     alert('Status updated to Open to Talking. You can now continue the conversation from Messages.')
   }
 
-  const handleSetOwnerStatus = async (nextStatus: 'settled' | 'open' | 'sale' | 'rent') => {
+  // Use centralized logic
+  const strengthResult = calculateProfileStrength(selectedHome, intentOverrides[selectedHome?.id || ''] || {}, heroImage)
+  const profileStrength = strengthResult.total
+  const isGraduated = profileStrength === 100
+
+  const statusSet = !!intentOverrides[selectedHome?.id || '']?.status_confirmed
+
+  const handleVerifyFactsClick = () => {
+    // Scroll to editor (it's right there, maybe just focus?)
+    const el = document.getElementById('home-facts-editor')
+    if (el) el.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const handleSetStatusClick = () => {
+    const el = document.getElementById('owner-controls')
+    if (el) el.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const handleSaveFacts = async (data: { bedrooms: number; type: string; story: string }) => {
     if (!selectedHome || !currentUser) return
-    if (!claimRecord || claimRecord.property_id !== selectedHome.id || claimRecord.user_id !== currentUser.id) return
+    setAdminSaving(true) // Reuse saving state or make new one
+
+    // 1. Update Property fields
+    const { error: propError } = await supabase
+      .from('properties')
+      .update({
+        bedroom_estimate: data.bedrooms,
+        home_type: data.type
+      } as any)
+      .eq('id', selectedHome.id)
+
+    // 2. Update Story (if provided)
+    if (data.story) {
+      const { error: storyError } = await supabase
+        .from('home_story')
+        .upsert({
+          property_id: selectedHome.id,
+          summary_text: data.story,
+          // user_id: currentUser.id // Optional depending on schema
+        } as any, { onConflict: 'property_id' })
+    }
+
+    if (propError) {
+      console.error('Error saving facts', propError)
+      alert('Failed to save facts')
+      setAdminSaving(false)
+      return
+    }
+
+    // Update local state
+    setShops(prev => prev.map(p => p.id === selectedHome.id ? { ...p, bedroom_estimate: data.bedrooms, home_type: data.type } : p))
+    setSelectedHome(prev => prev ? { ...prev, bedroom_estimate: data.bedrooms, home_type: data.type } : prev)
+
+    // Stop editing if in graduated mode
+    setIsEditingFacts(false)
+
+    setAdminSaving(false)
+  }
+
+  const handleSetOwnerStatus = async (nextStatus: 'settled' | 'open' | 'sale' | 'rent') => {
+    console.log('[handleSetOwnerStatus] Called with:', {
+      nextStatus,
+      selectedHome: selectedHome?.id,
+      currentUser: currentUser?.id,
+      claimRecord: claimRecord ? { property_id: claimRecord.property_id, user_id: claimRecord.user_id } : null
+    })
+
+    if (!selectedHome || !currentUser) {
+      console.log('[handleSetOwnerStatus] BLOCKED: No selectedHome or currentUser')
+      return
+    }
+    if (!claimRecord || claimRecord.property_id !== selectedHome.id || claimRecord.user_id !== currentUser.id) {
+      console.log('[handleSetOwnerStatus] BLOCKED: claimRecord guard failed', {
+        hasClaimRecord: !!claimRecord,
+        propertyMatch: claimRecord?.property_id === selectedHome.id,
+        userMatch: claimRecord?.user_id === currentUser.id
+      })
+      return
+    }
+
+    console.log('[handleSetOwnerStatus] PASSED guards, proceeding...')
+
+    setHasInteracted(true) // Mark as interacted!
 
     const prevSoft = isOpenToTalking
     const prevSale = localForSale
     const prevRent = localForRent
 
-    const nextSoft = nextStatus === 'open' || nextStatus === 'sale' || nextStatus === 'rent'
+    // FIX: Each status is MUTUALLY EXCLUSIVE
+    // - Settled: all false
+    // - Open: only is_open_to_talking = true
+    // - Sale: only is_for_sale = true
+    // - Rent: only is_for_rent = true
+    const nextSoft = nextStatus === 'open'  // ONLY true for 'open', not sale/rent
     const nextSale = nextStatus === 'sale'
     const nextRent = nextStatus === 'rent'
 
@@ -905,6 +770,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       is_for_rent: nextRent,
       claimed_by_user_id: currentUser.id,
       is_claimed: true,
+      status_confirmed: true // also confirm here if triggered by function
     })
     setSoftListingSaving(true)
     setSoftListingError(null)
@@ -918,7 +784,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           soft_listing: nextSoft,
           is_for_sale: nextSale,
           is_for_rent: nextRent,
-        },
+        } as any,
         { onConflict: 'property_id' }
       )
       .select()
@@ -947,75 +813,19 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       )
     )
 
+    // CRITICAL: Also update selectedHome so PropertyCard re-renders with new intent values
+    setSelectedHome((prev) =>
+      prev ? { ...prev, is_open_to_talking: nextSoft, is_for_sale: nextSale, is_for_rent: nextRent } : prev
+    )
+
     // Bump refresh signal so the map fetches latest flags
     setMapRefreshSignal((s) => s + 1)
 
     setSoftListingSaving(false)
+    console.log('[handleSetOwnerStatus] COMPLETED - State updated')
   }
 
-  const handleSaveStory = async () => {
-    if (!selectedHome) return
-    if (!isClaimedByYou) {
-      setStoryError('Only the claimant can edit this home story.')
-      return
-    }
-
-    setSavingStory(true)
-    setStoryError(null)
-
-    try {
-      const uploadMap = new Map(newUploads.map((u) => [u.url, u.file]))
-      const pendingUploads = imageOrder.filter((url) => uploadMap.has(url))
-      const filesToUpload = pendingUploads.map((url) => uploadMap.get(url)).filter((file): file is File => !!file)
-
-      let uploadedUrls: string[] = []
-      if (filesToUpload.length) {
-        uploadedUrls = await uploadHomeStoryImages(supabase, selectedHome.id, filesToUpload)
-      }
-
-      let uploadIndex = 0
-      const finalImages = imageOrder
-        .map((url) => {
-          if (uploadMap.has(url)) {
-            const uploaded = uploadedUrls[uploadIndex]
-            uploadIndex += 1
-            return uploaded ?? null
-          }
-          return url
-        })
-        .filter((url): url is string => !!url)
-
-      const { data, error } = await supabase
-        .from('home_story')
-        .upsert(
-          {
-            property_id: selectedHome.id,
-            summary_text: storySummary || null,
-            images: finalImages.length ? finalImages : null,
-          } as any,
-          { onConflict: 'property_id' } // respect unique constraint for one story per property
-        )
-        .select('*')
-        .single()
-
-      if (error) {
-        setStoryError(error.message)
-        return
-      }
-
-      setHomeStory(data)
-      const storyData = data as any
-      setStoryImages(storyData?.images ?? finalImages)
-      setImageOrder(storyData?.images ?? finalImages)
-      setNewUploads([])
-      setCurrentImageIndex(0)
-      setEditingStory(false)
-    } catch (err: any) {
-      setStoryError(err.message ?? 'Failed to save home story')
-    } finally {
-      setSavingStory(false)
-    }
-  }
+  // Story Save logic moved to HomeStorySection
 
   const currentUserId = currentUser?.id
   const propertyIsClaimed = !!(
@@ -1036,70 +846,197 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       : isOpenToTalking
         ? 'open'
         : 'settled'
-  const displayImages = imageOrder
-  const storyMatchesSelection = storyForId === selectedHome?.id
+
+  /* const effectiveIntentFlags = computeIntentFlags() */
+
+  // Handle Intent Change from PropertyCard
+  const handleIntentChange = async (key: string, value: boolean) => {
+    console.log('[IntentChange] Called with:', { key, value, claimRecord, selectedHome: selectedHome?.id, currentUser: currentUser?.id })
+
+    if (key === 'settled' && value) {
+      console.log('[IntentChange] -> handleSetOwnerStatus(settled)')
+      await handleSetOwnerStatus('settled')
+      return
+    }
+
+    if (!value) {
+      console.log('[IntentChange] -> handleSetOwnerStatus(settled) [toggle off]')
+      await handleSetOwnerStatus('settled')
+    } else {
+      if (key === 'open_to_talking') {
+        console.log('[IntentChange] -> handleSetOwnerStatus(open)')
+        await handleSetOwnerStatus('open')
+      }
+      if (key === 'for_sale') {
+        console.log('[IntentChange] -> handleSetOwnerStatus(sale)')
+        await handleSetOwnerStatus('sale')
+      }
+      if (key === 'for_rent') {
+        console.log('[IntentChange] -> handleSetOwnerStatus(rent)')
+        await handleSetOwnerStatus('rent')
+      }
+    }
+  }
+
+  const handleLeaveNote = () => {
+    setMessageModalMode('note')
+    setIsMessageModalOpen(true)
+  }
+
+  const handlePhotoUploadAdapter = async (file: File) => {
+    if (!selectedHome || !currentUser) return
+    setHeroUploading(true)
+    try {
+      const urls = await uploadHomeStoryImages(supabase, selectedHome.id, [file])
+
+      const { data: existing } = await supabase
+        .from('home_story')
+        .select('images')
+        .eq('property_id', selectedHome.id)
+        .maybeSingle()
+
+      const existingImages = (existing?.images as string[]) || []
+      const newImages = [...existingImages, ...urls]
+
+      await supabase
+        .from('home_story')
+        .upsert({
+          property_id: selectedHome.id,
+          user_id: currentUser.id,
+          images: newImages,
+        }, { onConflict: 'property_id' })
+
+      setHeroImage(newImages[0])
+    } catch (error) {
+      console.error('Hero upload failed:', error)
+      alert('Failed to upload photo')
+    } finally {
+      setHeroUploading(false)
+    }
+  }
 
   const renderOwnershipControls = () => {
     if (claimRecord && claimRecord.property_id === selectedHome?.id && claimRecord.user_id === currentUserId) {
+      // Calculate checklist completion
+      /* Using centralized strengthResult for checklist props */
+
       return (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Owner controls</p>
-              <p className="text-xs text-gray-600">Choose how you want to signal intent.</p>
-              {softListingError && (
-                <p className="mt-1 text-xs text-red-600">{softListingError}</p>
+        <>
+          {/* OWNER CHECKLIST OR GRADUATED DISPLAY */}
+          {isOwner && (
+            <>
+              {/* IF Graduated (100%), show Story Display. Otherwise show checklist/editor or if editing explicitly */}
+              {isGraduated && !isEditingFacts ? (
+                <div className="mb-6">
+                  <HomeStoryDisplay
+                    story={null}
+                    bedroomCount={selectedHome?.bedroom_estimate ?? null}
+                    homeType={selectedHome?.home_type ?? null}
+                    onEdit={() => setIsEditingFacts(true)}
+                  />
+                </div>
+              ) : (
+                <>
+                  {!isGraduated && (
+                    <OwnerChecklist
+                      hasPhoto={strengthResult.breakdown.hasPhoto}
+                      hasFacts={strengthResult.breakdown.hasFacts}
+                      hasStatusSet={strengthResult.breakdown.hasIntent}
+                      onAddPhotoClick={() => heroFileInputRef.current?.click()}
+                      onVerifyFactsClick={handleVerifyFactsClick}
+                      onSetStatusClick={handleSetStatusClick}
+                    />
+                  )}
+
+                  <div id="home-facts-editor" className="mb-6">
+                    <HomeFactsEditor
+                      bedroomCount={selectedHome?.bedroom_estimate ?? null}
+                      homeType={selectedHome?.home_type ?? null}
+                      oneLiner={""}
+                      onSave={handleSaveFacts}
+                      isSaving={adminSaving}
+                    />
+                  </div>
+                </>
               )}
-              {!softListingError && (softListingLoading || softListingSaving) && (
-                <p className="mt-1 text-xs text-gray-500">
-                  {softListingLoading ? 'Loading preference...' : 'Saving...'}
-                </p>
-              )}
+            </>
+          )}
+
+          {/* PROPERTY DATA GRID */}
+          <div ref={statusSelectorRef} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Owner controls</p>
+                <p className="text-xs text-gray-600">Choose how you want to signal intent.</p>
+                {softListingError && (
+                  <p className="mt-1 text-xs text-red-600">{softListingError}</p>
+                )}
+                {!softListingError && (softListingLoading || softListingSaving) && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {softListingLoading ? 'Loading preference...' : 'Saving...'}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { key: 'settled', label: 'Settled', description: 'No active signals', tone: 'neutral', icon: <HomeIcon className="h-4 w-4" /> },
+                { key: 'open', label: 'Open to Talking', description: 'Soft listing', tone: 'teal', icon: <MessageCircle className="h-4 w-4" /> },
+                { key: 'sale', label: 'For Sale', description: 'High intent', tone: 'coral', icon: <Tag className="h-4 w-4" /> },
+                { key: 'rent', label: 'For Rent', description: 'Rental interest', tone: 'rent', icon: <Building2 className="h-4 w-4" /> },
+              ].map((option) => {
+                const isActive = ownerStatus === option.key
+                // Ghost Logic: If not active, not interacted yet, and profile incomplete -> Show Ghost (Clean/Empty)
+                const isGhost = !hasInteracted && profileStrength < 100 && !isActive
+
+                // Visuals
+                let buttonClass = ""
+                if (isGhost) {
+                  // Clean/Empty look (User Override: White bg, Slate-200 border, Slate-400 text)
+                  buttonClass = "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:text-slate-500"
+                } else if (isActive) {
+                  // Active Colors
+                  if (option.tone === 'teal') buttonClass = "bg-[#007C7C] border-[#007C7C] text-white shadow-md ring-1 ring-[#007C7C]"
+                  else if (option.tone === 'coral') buttonClass = "bg-[#E65F52] border-[#E65F52] text-white shadow-md ring-1 ring-[#E65F52]"
+                  else if (option.tone === 'rent') buttonClass = "bg-[#6366F1] border-[#6366F1] text-white shadow-md ring-1 ring-[#6366F1]"
+                  else buttonClass = "bg-slate-800 border-slate-800 text-white shadow-md ring-1 ring-slate-800" // Settled Active
+                } else {
+                  // Initial / Inactive but Interactive (Standard)
+                  buttonClass = "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-600"
+                }
+
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => handleSetOwnerStatus(option.key as OwnerStatus)}
+                    disabled={softListingLoading || softListingSaving}
+                    className={clsx(
+                      'w-full rounded-xl border p-4 text-left transition-all flex flex-col items-start gap-1',
+                      softListingLoading || softListingSaving ? 'opacity-60 cursor-not-allowed' : '',
+                      buttonClass
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      {option.icon}
+                      <p className="text-sm font-semibold">
+                        {option.label}
+                      </p>
+                    </div>
+                    <p className={clsx('text-xs', isActive ? 'text-white/90' : isGhost ? 'text-slate-400' : 'text-slate-500')}>
+                      {option.description}
+                    </p>
+                    {isActive && (
+                      <div className="absolute top-2 right-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-white/90 animate-pulse shadow-sm" />
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { key: 'settled', label: 'Settled', description: 'No active signals', tone: 'neutral', icon: <HomeIcon className="h-4 w-4" /> },
-              { key: 'open', label: 'Open to Talking', description: 'Soft listing', tone: 'teal', icon: <MessageCircle className="h-4 w-4" /> },
-              { key: 'sale', label: 'For Sale', description: 'High intent', tone: 'coral', icon: <Tag className="h-4 w-4" /> },
-              { key: 'rent', label: 'For Rent', description: 'Rental interest', tone: 'rent', icon: <Building2 className="h-4 w-4" /> },
-            ].map((option) => {
-              const isActive = ownerStatus === option.key
-              const activeClass =
-                option.tone === 'teal'
-                  ? 'bg-[#007C7C] border-[#007C7C] text-white'
-                  : option.tone === 'coral'
-                    ? 'bg-[#E65F52] border-[#E65F52] text-white'
-                    : option.tone === 'rent'
-                      ? 'bg-[#6366F1] border-[#6366F1] text-white'
-                      : 'bg-slate-900 border-slate-900 text-white'
-
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => handleSetOwnerStatus(option.key as OwnerStatus)}
-                  disabled={softListingLoading || softListingSaving}
-                  className={clsx(
-                    'w-full rounded-xl border p-4 text-left transition-all flex flex-col items-start gap-1',
-                    softListingLoading || softListingSaving ? 'opacity-60 cursor-not-allowed' : 'hover:border-slate-300',
-                    isActive ? activeClass : 'bg-white border-slate-200 text-slate-600'
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    {option.icon}
-                    <p className="text-sm font-semibold">
-                      {option.label}
-                    </p>
-                  </div>
-                  <p className={clsx('text-xs', isActive ? 'text-white/90' : 'text-slate-500')}>
-                    {option.description}
-                  </p>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+        </>
       )
     }
 
@@ -1124,11 +1061,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
           type="button"
           className="w-full py-3 mt-3 bg-white border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 flex items-center justify-center gap-2 shadow-sm"
           onClick={() => {
-            setMessageMode('future')
-            setMessageHeader('Leave a note for the future owner')
-            setMessageSubtext('This home isn\'t claimed yet. We\'ll save your note and notify the owner the moment they join Nest.')
-            setMessageBody('')
-            setMessageError(null)
+            setMessageModalMode('future')
             setIsMessageModalOpen(true)
           }}
         >
@@ -1138,12 +1071,18 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       </>
     )
   }
-  const statusBadge = selectedHome
-    ? isOpenToTalking
-      ? { label: 'Open to talking', classes: 'bg-[#007C7C]/10 text-[#007C7C]' }
-      : selectedHome.is_claimed
-        ? { label: 'Claimed', classes: 'bg-orange-100 text-orange-800' }
-        : { label: 'Unclaimed', classes: 'bg-slate-100 text-slate-700' }
+  // Primary Badge: Mirrors Map Pin Priority Exactly
+  // Sale > Rent > Open > Claimed > Unclaimed
+  const primaryBadge = selectedHome
+    ? localForSale
+      ? { label: 'For Sale', classes: 'bg-rose-100 text-rose-700' }
+      : localForRent
+        ? { label: 'For Rent', classes: 'bg-indigo-100 text-indigo-700' }
+        : isOpenToTalking
+          ? { label: 'Open to Talking', classes: 'bg-[#007C7C]/10 text-[#007C7C]' }
+          : selectedHome.is_claimed || claimRecord?.property_id === selectedHome.id
+            ? { label: 'Claimed', classes: 'bg-amber-100 text-amber-700' }
+            : { label: 'Unclaimed', classes: 'bg-slate-100 text-slate-600' }
     : null
   const effectiveIntentFlags = computeIntentFlags()
   const messageCtaMode: MessageMode = effectiveIntentFlags.sale || effectiveIntentFlags.rent || effectiveIntentFlags.open ? 'direct' : 'note'
@@ -1163,7 +1102,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   }, [currentUser?.id])
 
   const selectedHomeTitle = selectedHome
-    ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''}`.trim() ||
+    ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''} `.trim() ||
       selectedHome?.name ||
       'Home')
     : ''
@@ -1176,23 +1115,87 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     if (!selectedHome) {
       setLocalForSale(false)
       setLocalForRent(false)
+      setIsOpenToTalking(false) // Ensure this is reset
       setIntentForId(null)
       return
     }
     setLocalForSale(!!selectedHome.is_for_sale)
     setLocalForRent(!!selectedHome.is_for_rent)
+    setIsOpenToTalking(!!selectedHome.is_open_to_talking) // Sync this too
     setIntentForId(selectedHome.id)
   }, [selectedHome?.id])
 
+  // Fetch hero image from home_story when selectedHome changes
+  useEffect(() => {
+    if (!selectedHome?.id) {
+      setHeroImage(null)
+      return
+    }
+
+    let cancelled = false
+    const fetchHeroImage = async () => {
+      const { data, error } = await supabase
+        .from('home_story')
+        .select('images')
+        .eq('property_id', selectedHome.id)
+        .maybeSingle()
+
+      if (cancelled) return
+      if (error) {
+        console.error('Error fetching hero image', error)
+        setHeroImage(null)
+        return
+      }
+
+      const images = data?.images as string[] | null
+      setHeroImage(images && images.length > 0 ? images[0] : null)
+    }
+
+    fetchHeroImage()
+    return () => { cancelled = true }
+  }, [selectedHome?.id, supabase])
+
+  // Handle hero image upload (Direct Action)
+  const handleHeroUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length || !selectedHome || !currentUser) return
+    setHeroUploading(true)
+
+    try {
+      const files = Array.from(e.target.files)
+      const urls = await uploadHomeStoryImages(supabase, selectedHome.id, files)
+
+      // Upsert to home_story
+      const { data: existing } = await supabase
+        .from('home_story')
+        .select('images')
+        .eq('property_id', selectedHome.id)
+        .maybeSingle()
+
+      const existingImages = (existing?.images as string[]) || []
+      const newImages = [...existingImages, ...urls]
+
+      await supabase
+        .from('home_story')
+        .upsert({
+          property_id: selectedHome.id,
+          user_id: currentUser.id,
+          images: newImages,
+          summary_text: ''
+        }, { onConflict: 'property_id' })
+
+      setHeroImage(newImages[0])
+    } catch (error) {
+      console.error('Hero upload failed:', error)
+      alert('Failed to upload photo')
+    } finally {
+      setHeroUploading(false)
+      if (heroFileInputRef.current) heroFileInputRef.current.value = ''
+    }
+  }
+
   useEffect(() => {
     setIsMessageModalOpen(false)
-    setMessageBody('')
-    setMessageError(null)
-    setMessageMode('direct')
-    setMessageHeader('Message Owner')
-    setMessageSubtext(null)
-    setMessageSuccess(null)
-    setMessageSending(false)
+    setMessageModalMode(undefined)
   }, [selectedHome?.id])
 
   const handleLogout = async () => {
@@ -1219,18 +1222,18 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       if (existing) return existing
 
       const { data, error } = await supabase
-        .from('properties_public_view')
+        .from('property_public_view')
         .select('*')
         .eq('id', propertyId)
         .single()
 
       if (error) {
-        console.error('Deep link supabase error', error)
+        console.error('Deep link supabase error', JSON.stringify(error, null, 2))
         return null
       }
 
       if (data) {
-        const casted = data as MapProperty
+        const casted = data as unknown as MapProperty
         setShops((prev) => (prev.some((p) => p.id === casted.id) ? prev : [...prev, casted]))
         return casted
       }
@@ -1243,7 +1246,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       if (!target) return
 
       setSelectedHome(target)
-      mapRef.current?.flyTo([target.lat, target.lon], 18)
+      mapRef.current?.flyTo([target.lat, target.lon], 16, { animate: true, duration: 1 })
       if (openInbox) setIsInboxOpen(true)
 
       deepLinkHandledRef.current = propertyId
@@ -1253,7 +1256,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         url.searchParams.delete('propertyId')
         url.searchParams.delete('openInbox')
         const nextSearch = url.searchParams.toString()
-        window.history.replaceState(null, '', nextSearch ? `${url.pathname}?${nextSearch}` : url.pathname)
+        window.history.replaceState(null, '', nextSearch ? `${url.pathname}?${nextSearch} ` : url.pathname)
       }
     }
 
@@ -1341,7 +1344,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       pendingDeepLinkRef.current = null
     }
   }, [mapReady])
-  console.log('[HomeClient] isAdmin:', isAdmin)
+
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-white">
@@ -1382,7 +1385,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
 
 
-      <LayerToggle layers={layerState} onLayerChange={setLayerState} />
 
       <FloatingControls
         searchQuery={searchQuery}
@@ -1394,21 +1396,82 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         onLogout={handleLogout}
         onOpenInbox={() => setIsInboxOpen(true)}
         onOpenActivity={() => setIsActivityOpen(true)}
-        heatmapMode={heatmapMode}
-        onSetHeatmapMode={setHeatmapMode}
+        layers={layerState}
+        onLayerChange={(newLayers) => {
+          setLayerState(newLayers)
+          // Map heat -> 'all' | null
+          setHeatmapMode(newLayers.heat ? 'all' : null)
+        }}
         onOpenFilters={() => setShowFilters(true)}
         isAdmin={isAdmin}
         onAddHomeClick={() => setIsAddingHome(true)}
+        showLegend={showLegend}
+        onToggleLegend={() => setShowLegend(prev => !prev)}
+        onZoomIn={() => mapRef.current?.zoomIn()}
+        onZoomOut={() => mapRef.current?.zoomOut()}
+        onLocateMe={() => {
+          if ('geolocation' in navigator) {
+            setIsLocating(true)
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                const userLocation: [number, number] = [
+                  position.coords.latitude,
+                  position.coords.longitude
+                ]
+                setMapCenter(userLocation)
+                mapRef.current?.flyTo(userLocation, 16)
+                setIsLocating(false)
+              },
+              (error) => {
+                console.error('Locate failed', error)
+                alert('Could not locate you. Please enable permissions.')
+                setIsLocating(false)
+              }
+            )
+          } else {
+            alert('Geolocation is not supported by your browser.')
+          }
+        }}
       />
       <ActivityFeedDrawer
         userId={currentUser?.id}
         isOpen={isActivityOpen}
         onClose={() => setIsActivityOpen(false)}
+        onFlyToProperty={(lat, lon, propertyId) => {
+          // Explicitly close drawer to avoid race conditions
+          setIsActivityOpen(false)
+
+          const existingProp = shops.find(s => s.id === propertyId)
+          if (existingProp) {
+            handleShopClick(existingProp)
+          } else {
+            // Fetch and fly
+            supabase
+              .from('property_public_view')
+              .select('*')
+              .eq('id', propertyId)
+              .single()
+              .then(({ data, error }) => {
+                if (!error && data) {
+                  // Ensure numeric types and constructed object matches MapProperty
+                  const row = data as any
+                  const prop: MapProperty = {
+                    ...row,
+                    lat: Number(row.lat),
+                    lon: Number(row.lon),
+                    input_source: row.input_source ?? 'user',
+                    created_at: row.created_at ?? new Date().toISOString()
+                  } as unknown as MapProperty
+
+                  setShops(prev => prev.some(p => p.id === prop.id) ? prev : [...prev, prop])
+                  handleShopClick(prop)
+                }
+              })
+          }
+        }}
       />
 
-      <div className="z-40">
-        <MapLegend />
-      </div>
+
 
 
 
@@ -1428,16 +1491,42 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
       {/* Area Insights Panel */}
       {
-        isListOpen && (
-          <div className="absolute top-24 left-4 bottom-24 w-80 z-[60] pointer-events-none flex flex-col animate-in slide-in-from-left-4 duration-300">
-            {/* Pointer events auto is handled inside the component */}
-            <AreaInsightsPanel
-              properties={activeShops}
-              onSelectProperty={handleShopClick}
-              currentUser={currentUser}
-            />
-          </div>
-        )
+        <div className="absolute top-24 left-4 bottom-24 w-80 z-[60] pointer-events-none flex flex-col">
+          <AreaPulsePanel
+            currentCenter={mapCenter}
+            currentZoom={mapZoom}
+            className="pointer-events-auto"
+            onLocationSelect={handleLocationSelect}
+            onFlyToProperty={(lat, lon, propertyId) => {
+              const existingProp = shops.find(s => s.id === propertyId)
+              if (existingProp) {
+                handleShopClick(existingProp)
+              } else {
+                // Fetch and fly
+                supabase
+                  .from('property_public_view')
+                  .select('*')
+                  .eq('id', propertyId)
+                  .single()
+                  .then(({ data, error }) => {
+                    if (!error && data) {
+                      const row = data as any
+                      const prop: MapProperty = {
+                        ...row,
+                        lat: Number(row.lat),
+                        lon: Number(row.lon),
+                        input_source: row.input_source ?? 'user',
+                        created_at: row.created_at ?? new Date().toISOString()
+                      } as unknown as MapProperty
+
+                      setShops(prev => prev.some(p => p.id === prop.id) ? prev : [...prev, prop])
+                      handleShopClick(prop)
+                    }
+                  })
+              }
+            }}
+          />
+        </div>
       }
 
 
@@ -1450,15 +1539,46 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       />
 
       {
-        selectedHome && (
+        selectedHome && USE_ELASTIC_SHOPFRONT && (
+          <div className="z-[1050]">
+            <AnimatePresence>
+              {!isExpanded && (
+                <SmallCard
+                  key="small-card"
+                  property={selectedHome!}
+                  onExpand={() => setIsExpanded(true)}
+                  onClose={() => setSelectedHome(null)}
+                />
+              )}
+              {isExpanded && (
+                <ExpandedCard
+                  key="expanded-card"
+                  property={selectedHome!}
+                  onClose={() => {
+                    setIsExpanded(false)
+                    setSelectedHome(null)
+                  }}
+                  onBack={() => setIsExpanded(false)}
+                  onClaim={handleClaimHome}
+                  onSelectNeighbor={setSelectedHome}
+                />
+              )}
+            </AnimatePresence>
+          </div>
+        )
+      }
+
+      {
+        selectedHome && !USE_ELASTIC_SHOPFRONT && (
           <div
-            className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/95 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[60] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
+            className="fixed inset-x-0 bottom-0 h-[60vh] w-full bg-white/40 backdrop-blur-xl shadow-2xl border border-gray-200 rounded-t-2xl p-0 z-[1050] flex flex-col overflow-hidden transition-all duration-300 ease-out md:inset-auto md:right-4 md:top-24 md:bottom-4 md:w-80 md:h-auto md:rounded-2xl"
           >
             {/* Hero */}
-            <div className="relative h-64 w-full bg-slate-100 group">
+            <div className="relative h-48 w-full bg-slate-100 group">
               <div className="absolute top-3 right-3 z-20 flex items-center gap-3">
                 <FollowButton
                   propertyId={selectedHome.id}
+                  isFollowed={followedIds.includes(selectedHome.id)}
                   initialIsFollowed={followedIds.includes(selectedHome.id)}
                   onToggleSuccess={(isNowFollowed) => {
                     setFollowedIds((prev) => {
@@ -1478,129 +1598,79 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                   &times;
                 </button>
               </div>
-              {/* Admin Edit Controls Header */}
-              {isAdmin && selectedHome && (
-                <div className="absolute top-3 left-3 z-20">
-                  <button
-                    onClick={() => {
-                      if (adminEditMode) {
-                        setAdminEditMode(false)
-                        setAdminEditData(null)
-                      } else {
-                        setAdminEditMode(true)
-                        setAdminEditData({
-                          house_number: selectedHome.house_number,
-                          street: selectedHome.street,
-                          postcode: selectedHome.postcode,
-                          price_estimate: selectedHome.price_estimate,
-                          lat: selectedHome.lat,
-                          lon: selectedHome.lon
-                        })
-                      }
-                    }}
-                    className="inline-flex h-9 px-3 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow hover:bg-white font-semibold text-xs gap-1"
-                  >
-                    {adminEditMode ? <><X size={14} /> Cancel Edit</> : <><Edit2 size={14} /> Admin Edit</>}
-                  </button>
-                </div>
-              )}
 
-              {storyLoading && !storyMatchesSelection ? (
-                <div className="h-full w-full bg-slate-200 animate-pulse" />
-              ) : displayImages.length === 0 ? (
-                <button
-                  type="button"
-                  className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-500 transition"
-                  onClick={() => {
-                    if (!isClaimedByYou) return
-                    fileInputRef.current?.click()
-                  }}
-                  disabled={!isClaimedByYou}
-                >
-                  <Camera className="h-10 w-10" />
-                  <span className="text-sm font-medium">Add photos of your home</span>
-                </button>
-              ) : (
-                <div className="relative h-full w-full overflow-hidden">
-                  <img
-                    src={displayImages[currentImageIndex]}
-                    alt="Home"
-                    className="h-full w-full object-cover"
+
+              {/* Progressive Delight Hero Image */}
+              {(() => {
+                const hasPhoto = heroImage || (selectedHome as any)?.image_url || (selectedHome as any)?.market_image_url
+                const isClaimed = selectedHome?.is_claimed
+                const canUpload = isClaimedByYou
+
+                // Hidden file input for direct upload
+                const fileInput = canUpload && (
+                  <input
+                    ref={heroFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleHeroUpload}
                   />
+                )
 
-                  {displayImages.length > 1 && (
+                // State 3: Showcase (Has Photo)
+                if (hasPhoto) {
+                  return (
                     <>
-                      <button
-                        type="button"
-                        className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
-                        onClick={() => setCurrentImageIndex((idx) => (idx === 0 ? displayImages.length - 1 : idx - 1))}
-                        aria-label="Previous photo"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
-                      <button
-                        type="button"
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-2 text-slate-700 shadow hover:bg-white focus:outline-none"
-                        onClick={() => setCurrentImageIndex((idx) => (idx === displayImages.length - 1 ? 0 : idx + 1))}
-                        aria-label="Next photo"
-                      >
-                        <ChevronRight className="h-5 w-5" />
-                      </button>
-                      <span className="absolute bottom-3 right-3 rounded-full bg-black/60 px-3 py-1 text-xs font-semibold text-white">
-                        {currentImageIndex + 1} / {displayImages.length}
-                      </span>
+                      {fileInput}
+                      <img
+                        src={heroImage || (selectedHome as any)?.image_url || (selectedHome as any)?.market_image_url}
+                        className={`w-full h-full object-cover ${canUpload ? 'cursor-pointer' : ''} `}
+                        alt="Home"
+                        onClick={() => canUpload && heroFileInputRef.current?.click()}
+                      />
+                      {heroUploading && (
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                          <span className="text-white font-medium">Uploading...</span>
+                        </div>
+                      )}
                     </>
-                  )}
+                  )
+                }
 
-                  {isClaimedByYou && (
+                // State 2: Vibe Gradient (Claimed, No Photo)
+                if (isClaimed) {
+                  const postcode = selectedHome?.postcode || ''
+                  const gradientClass = postcode.startsWith('NE26') || postcode.startsWith('NE30')
+                    ? 'bg-gradient-to-br from-teal-400 to-blue-500'
+                    : postcode.startsWith('NE28') || postcode.startsWith('NE29')
+                      ? 'bg-gradient-to-br from-slate-400 to-slate-600'
+                      : 'bg-gradient-to-br from-emerald-400 to-teal-500'
+
+                  return (
                     <>
-                      <button
-                        type="button"
-                        className="absolute top-3 right-12 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow hover:bg-white"
-                        onClick={() => fileInputRef.current?.click()}
-                        aria-label="Add photo"
+                      {fileInput}
+                      <div
+                        className={`w-full h-full flex flex-col items-center justify-center ${gradientClass} ${canUpload ? 'cursor-pointer' : ''} `}
+                        onClick={() => canUpload && heroFileInputRef.current?.click()}
                       >
-                        <Plus className="h-5 w-5" />
-                      </button>
-                      <button
-                        type="button"
-                        className="absolute top-3 left-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-red-600 shadow hover:bg-white"
-                        onClick={handleDeleteImage}
-                        aria-label="Delete photo"
-                        disabled={!displayImages.length}
-                      >
-                        <Trash2 className="h-5 w-5" />
-                      </button>
-                      <button
-                        type="button"
-                        className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow hover:bg-white"
-                        onClick={handleMakeMain}
-                        disabled={!displayImages.length}
-                      >
-                        {currentImageIndex === 0 ? (
-                          <span className="inline-flex items-center gap-1 text-[#007C7C]">
-                            <Star className="h-4 w-4 fill-[#007C7C] text-[#007C7C]" />
-                            Main Photo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1">
-                            <StarOff className="h-4 w-4" />
-                            Make Main
-                          </span>
-                        )}
-                      </button>
+                        <Camera className="text-white/70" size={36} />
+                        <span className="text-white/90 text-sm mt-2 font-semibold">
+                          {heroUploading ? 'Uploading...' : 'Add a photo'}
+                        </span>
+                      </div>
                     </>
-                  )}
-                </div>
-              )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/*"
-                className="hidden"
-                onChange={handleStoryFileChange}
-              />
+                  )
+                }
+
+                // State 1: Ghost Map (Unclaimed)
+                return (
+                  <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex flex-col items-center justify-center">
+                    <MapPin className="text-slate-400" size={32} />
+                    <span className="text-slate-500 text-sm mt-2 font-medium">Claim this home to add photos</span>
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Content */}
@@ -1739,13 +1809,15 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                   <div className="h-5 w-32 bg-slate-200 rounded animate-pulse"></div>
                 ) : (
                   <>
-                    {statusBadge && (
-                      <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${statusBadge.classes}`}>
-                        {statusBadge.label}
+                    {/* Primary Badge: Mirrors Map Pin Signal */}
+                    {primaryBadge && (
+                      <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${primaryBadge.classes}`}>
+                        {primaryBadge.label}
                       </span>
                     )}
-                    {claimRecord && claimRecord.property_id === selectedHome.id && isClaimedByYou && (
-                      <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700">
+                    {/* Secondary: Claimed by you indicator */}
+                    {isClaimedByYou && (
+                      <span className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">
                         Claimed by you
                       </span>
                     )}
@@ -1806,139 +1878,16 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                 </p>
               )}
 
-              <div className="pt-2 border-t border-gray-200">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-base font-semibold text-gray-900">About this home</h3>
-                  {homeStory && isClaimedByYou && !editingStory && (
-                    <button
-                      className="text-sm text-amber-700 hover:text-amber-800 font-semibold"
-                      onClick={() => setEditingStory(true)}
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-
-                {storyLoading || !storyMatchesSelection ? (
-                  <div className="space-y-2">
-                    <div className="h-4 w-32 bg-slate-200 rounded animate-pulse"></div>
-                    <div className="h-16 w-full bg-slate-200 rounded animate-pulse"></div>
-                  </div>
-                ) : (
-                  <>
-                    {storyError && (
-                      <div className="mb-3 text-sm text-red-600">
-                        {storyError}
-                      </div>
-                    )}
-
-                    {isClaimedByYou ? (
-                      <>
-                        {(!homeStory || editingStory) ? (
-                          <div className="space-y-3">
-                            <div>
-                              <textarea
-                                value={storySummary}
-                                onChange={(e) => setStorySummary(e.target.value)}
-                                rows={4}
-                                className="w-full min-h-[120px] bg-slate-50 border-0 rounded-xl p-4 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                placeholder="Tell neighbors what you love about living here..."
-                              />
-                            </div>
-
-                            {homeStory && (
-                              <div className="flex justify-end">
-                                <button
-                                  className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                                  onClick={() => {
-                                    setEditingStory(false)
-                                    setStorySummary(homeStory?.summary_text ?? '')
-                                    setStoryImages(homeStory?.images ?? [])
-                                    setImageOrder(homeStory?.images ?? [])
-                                    setNewUploads([])
-                                    setCurrentImageIndex(0)
-                                    setStoryError(null)
-                                  }}
-                                  type="button"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {homeStory?.summary_text ? (
-                              <p className="text-sm text-gray-800 whitespace-pre-line">
-                                {homeStory.summary_text}
-                              </p>
-                            ) : (
-                              <p className="text-sm text-gray-500">No story added yet.</p>
-                            )}
-                            {homeStory?.images?.length ? (
-                              <div className="grid grid-cols-3 gap-2">
-                                {homeStory.images.map((url: string) => (
-                                  <img
-                                    key={url}
-                                    src={url}
-                                    alt="Home story"
-                                    className="h-16 w-full object-cover rounded-md border"
-                                  />
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {homeStory ? (
-                          <div className="space-y-2">
-                            {homeStory.summary_text ? (
-                              <p className="text-sm text-gray-800 whitespace-pre-line">
-                                {homeStory.summary_text}
-                              </p>
-                            ) : (
-                              <p className="text-sm text-gray-500">No story text provided.</p>
-                            )}
-                            {homeStory.images?.length ? (
-                              <div className="grid grid-cols-3 gap-2">
-                                {homeStory.images.map((url: string) => (
-                                  <img
-                                    key={url}
-                                    src={url}
-                                    alt="Home story"
-                                    className="h-16 w-full object-cover rounded-md border"
-                                  />
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-gray-500">No home story yet.</p>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {isClaimedByYou && (editingStory || !homeStory) && (
-                <button
-                  className="mt-4 w-full py-3.5 rounded-full font-semibold text-white bg-[#007C7C] shadow-lg transition-transform active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleSaveStory}
-                  disabled={savingStory}
-                >
-                  {savingStory ? 'Saving...' : 'Update details'}
-                </button>
-              )}
+              <HomeStorySection
+                selectedHome={selectedHome!}
+                currentUser={currentUser}
+                isClaimedByYou={isClaimedByYou}
+              />
 
               <div className="mt-8 text-center">
                 <button
-                  onClick={() => {
-                    alert('Thanks for flagging. Our team will review this home.')
-                  }}
-                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                  onClick={() => setIsFlagModalOpen(true)}
+                  className="text-xs text-slate-400 hover:text-rose-500 underline cursor-pointer"
                 >
                   Flag this home
                 </button>
@@ -1963,79 +1912,35 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         onMarkRead={(propertyId, partnerId) => markThreadRead(propertyId, partnerId)}
       />
 
-      {
-        messageSuccess && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] rounded-full bg-[#007C7C] text-white px-4 py-2 shadow-lg">
-            {messageSuccess}
+      {selectedHome && (
+        <MessageModal
+          isOpen={isMessageModalOpen}
+          initialMode={messageModalMode}
+          onClose={() => setIsMessageModalOpen(false)}
+          selectedHome={selectedHome}
+          currentUser={currentUser}
+          intentFlags={computeIntentFlags()}
+        />
+      )}
+
+      {selectedHome && (
+        <FlagModal
+          isOpen={isFlagModalOpen}
+          onClose={() => setIsFlagModalOpen(false)}
+          propertyId={selectedHome.id}
+          userId={currentUser?.id}
+        />
+      )}
+
+      {/* Claim Toast */}
+      {claimToast && (
+        <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
+          <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2">
+            <span className="text-xl">🏠</span>
+            <span className="font-semibold">{claimToast}</span>
           </div>
-        )
-      }
-
-      {
-        isMessageModalOpen && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
-            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-              <div className="flex items-start justify-between border-b border-slate-200 p-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{messageHeader}</h3>
-                  {messageSubtext && (
-                    <p className="mt-1 text-xs text-slate-500">{messageSubtext}</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  onClick={() => setIsMessageModalOpen(false)}
-                  aria-label="Close message modal"
-                >
-                  &times;
-                </button>
-              </div>
-
-              <div className="p-4 space-y-3">
-                <textarea
-                  className="w-full rounded-xl border border-slate-200 p-3 text-sm text-slate-800 focus:border-[#007C7C] focus:outline-none focus:ring-2 focus:ring-[#007C7C]/20"
-                  rows={4}
-                  placeholder={
-                    messageMode === 'direct'
-                      ? 'Write a message to the owner...'
-                      : messageMode === 'future'
-                        ? 'Leave a note for the future owner...'
-                        : 'Tell the owner you are interested...'
-                  }
-                  value={messageBody}
-                  onChange={(e) => setMessageBody(e.target.value)}
-                />
-                {messageError && (
-                  <p className="text-xs text-red-600">{messageError}</p>
-                )}
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-slate-200 p-4">
-                <button
-                  type="button"
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                  onClick={() => setIsMessageModalOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-[#007C7C] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#006868] disabled:opacity-60"
-                  onClick={handleSendMessage}
-                  disabled={messageSending || !messageBody.trim()}
-                >
-                  {messageSending
-                    ? 'Sending...'
-                    : messageMode === 'direct'
-                      ? 'Send message'
-                      : 'Send note'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      }
+        </div>
+      )}
     </div>
   )
 }

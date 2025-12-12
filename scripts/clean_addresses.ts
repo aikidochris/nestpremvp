@@ -30,7 +30,7 @@ async function main() {
 
         const updates = []
 
-        for (const p of props) {
+        for (const p of (props as any[])) {
             let num = p.house_number?.trim()
             let st = p.street?.trim()
 
@@ -61,7 +61,7 @@ async function main() {
         }
 
         if (updates.length > 0) {
-            const { error: upErr } = await supabase.from('properties').upsert(updates, { onConflict: 'id' })
+            const { error: upErr } = await supabase.from('properties').upsert(updates as any, { onConflict: 'id' })
 
             if (upErr) {
                 console.error('❌ Update Error:', upErr.message)

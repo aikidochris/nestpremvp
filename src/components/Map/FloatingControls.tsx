@@ -1,8 +1,15 @@
 import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon, RefreshCw, Flame, MessageCircle, Globe, SlidersHorizontal, LayoutDashboard, PlusCircle } from "lucide-react";
+import { User as UserIcon, LogOut as LogOutIcon, Menu as MenuIcon, RefreshCw, Flame, MessageCircle, SlidersHorizontal, LayoutDashboard, PlusCircle, Info, Layers, Locate, Plus, Minus, GraduationCap, TrainFront, Satellite, AlignLeft } from "lucide-react";
 import NotificationBell from "@/components/Notifications/NotificationBell";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+
+export interface LayerState {
+  homes: boolean
+  heat: boolean
+  schools: boolean
+  transport: boolean
+}
 
 interface FloatingControlsProps {
   searchQuery: string;
@@ -14,11 +21,18 @@ interface FloatingControlsProps {
   onLogout?: () => void;
   onOpenInbox?: () => void;
   onOpenActivity?: () => void;
-  heatmapMode?: 'all' | 'market' | 'social' | null;
-  onSetHeatmapMode?: (mode: 'all' | 'market' | 'social' | null) => void;
   onOpenFilters?: () => void;
   isAdmin?: boolean;
   onAddHomeClick?: () => void;
+  showLegend?: boolean;
+  onToggleLegend?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onLocateMe?: () => void;
+
+  // New Layer Props
+  layers?: LayerState;
+  onLayerChange?: (layers: LayerState) => void;
 }
 
 export default function FloatingControls({
@@ -31,11 +45,16 @@ export default function FloatingControls({
   onLogout,
   onOpenInbox,
   onOpenActivity,
-  heatmapMode,
-  onSetHeatmapMode,
   onOpenFilters,
   isAdmin,
-  onAddHomeClick
+  onAddHomeClick,
+  showLegend,
+  onToggleLegend,
+  onZoomIn,
+  onZoomOut,
+  onLocateMe,
+  layers,
+  onLayerChange
 }: FloatingControlsProps) {
   const [suggestions, setSuggestions] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -43,6 +62,9 @@ export default function FloatingControls({
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [fetchedIsAdmin, setFetchedIsAdmin] = useState(false);
+
+  // Layer Menu State
+  const [showLayerMenu, setShowLayerMenu] = useState(false);
 
   useEffect(() => {
     if (!isAdmin && currentUser?.id) {
@@ -171,108 +193,106 @@ export default function FloatingControls({
     }
   };
 
-  const isHeatmapActive = !!heatmapMode;
-
-  const handleToggleHeatmap = () => {
-    if (isHeatmapActive) {
-      onSetHeatmapMode?.(null);
-    } else {
-      onSetHeatmapMode?.('all');
-    }
+  const handleToggleLayer = (key: keyof LayerState) => {
+    if (!layers || !onLayerChange) return;
+    onLayerChange({ ...layers, [key]: !layers[key] });
   };
 
+
   return (
-    <div className="pointer-events-none absolute top-4 left-0 right-0 z-50 px-4">
-      <div className="relative flex flex-col gap-3">
-        <div className="relative flex items-center gap-3">
-          <div className="pointer-events-auto flex items-center gap-3 w-full max-w-3xl">
+    <div className="pointer-events-none absolute inset-0 z-[1000] overflow-hidden">
+
+      {/* 1. TOP CENTER SEARCH PILL - GLASSMORPHISM */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-[1000] pointer-events-auto">
+        <div className="relative">
+          <div className="flex items-center gap-3 w-full bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl rounded-full px-4 py-3 border border-white/40 shadow-black/10 transition-shadow focus-within:ring-2 focus-within:ring-white/50 ring-1 ring-black/5">
             {onToggleList && (
               <button
                 type="button"
                 onClick={onToggleList}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 backdrop-blur-md text-brand-dark font-bold shadow-md ring-1 ring-gray-100 border border-gray-100"
+                className="xl:hidden sm:hidden inline-flex items-center justify-center text-slate-500 hover:text-slate-800"
                 aria-label={isListOpen ? "Hide list" : "Show list"}
               >
-                <MenuIcon className="h-5 w-5" />
+                <AlignLeft className="h-5 w-5" />
               </button>
             )}
-            <a
-              href="/"
-              className="hidden sm:block select-none cursor-pointer font-bold text-2xl tracking-tight text-brand-dark"
+            <MagnifyingGlassIcon className="h-5 w-5 text-slate-500 shrink-0" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={handleSearch}
+              onKeyDown={handleKeyDown}
+              ref={inputRef}
+              placeholder="Search by street, postcode..."
+              className="flex-1 bg-transparent border-none outline-none text-base text-slate-800 placeholder:text-slate-400 h-6 font-medium tracking-tight"
+            />
+            {/* Divider */}
+            <div className="w-px h-5 bg-slate-200 mx-1"></div>
+            {/* Filter Toggle */}
+            <button
+              onClick={onOpenFilters}
+              className="p-1.5 hover:bg-white/50 rounded-full text-slate-500 hover:text-slate-900 transition-colors"
             >
-              Nest
-            </a>
-            <div className="relative w-full">
-              <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={handleSearch}
-                onKeyDown={handleKeyDown}
-                ref={inputRef}
-                placeholder="Search streets, postcodes..."
-                className="w-full rounded-full bg-white/80 backdrop-blur-md shadow-xl border border-white/20 px-4 py-3 pl-10 pr-12 text-sm font-medium text-brand-dark placeholder:text-slate-400 ring-1 ring-slate-200/60 focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-
-              {/* Filter Button inside Search Bar */}
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                <div className="w-px h-5 bg-slate-200 mx-1"></div>
-                <button
-                  onClick={onOpenFilters}
-                  className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 hover:text-slate-800 transition-colors"
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                </button>
-              </div>
-
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute left-0 right-0 mt-2 max-h-60 overflow-y-auto rounded-2xl bg-white/95 backdrop-blur-md shadow-2xl ring-1 ring-slate-200 z-[100]">
-                  {suggestions.map((item, idx) => (
-                    <button
-                      key={`${item.display_name}-${idx}`}
-                      type="button"
-                      onClick={() => handleSuggestionClick(item)}
-                      className={`flex w-full items-start p-3 text-left text-sm text-slate-700 hover:bg-teal-50 cursor-pointer border-t border-slate-100 first:border-t-0 truncate ${idx === highlightedIndex ? "bg-teal-50" : ""
-                        }`}
-                    >
-                      <span className="truncate">{item.display_name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+              <SlidersHorizontal className="h-4 w-4" />
+            </button>
           </div>
-          <div className="pointer-events-auto absolute top-0 right-0 flex items-center gap-3">
-            <NotificationBell userId={currentUser?.id} />
-            {!currentUser ? (
-              <a
-                href="/auth/login"
-                className="inline-flex items-center rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-[#006868] transition"
-              >
-                Log in
-              </a>
-            ) : (
-              <div className="relative">
+
+          {/* Suggestions Dropdown */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-3 rounded-3xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl border border-white/40 shadow-black/10 p-2 z-[101] overflow-hidden ring-1 ring-black/5">
+              {suggestions.map((item, idx) => (
                 <button
+                  key={`${item.display_name}-${idx}`}
                   type="button"
-                  onClick={() => setMenuOpen((prev) => !prev)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/80 backdrop-blur-md text-brand-dark font-bold shadow-md ring-1 ring-gray-100 border border-gray-100"
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
+                  onClick={() => handleSuggestionClick(item)}
+                  className={`flex w-full items-start p-3 text-left text-sm text-slate-700 hover:bg-white/60 rounded-xl cursor-pointer transition-colors ${idx === highlightedIndex ? "bg-white/60" : ""
+                    }`}
                 >
-                  {emailInitial}
+                  <div className="bg-slate-100 p-2 rounded-full mr-3 shrink-0">
+                    <Locate size={14} className="text-slate-500" />
+                  </div>
+                  <span className="truncate py-1 font-medium">{item.display_name}</span>
                 </button>
-                {menuOpen && (
-                  <div className="absolute right-0 mt-2 w-48 rounded-xl bg-white shadow-xl border border-gray-100 p-2">
-                    <div className="text-xs text-gray-500 px-3 py-2 border-b border-gray-100 truncate">
-                      {currentUser.email}
-                    </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+
+      {/* 2. TOP RIGHT USER SPOT - GLASSMORPHISM */}
+      <div className="absolute top-4 right-4 z-[1000] pointer-events-auto">
+        <div className="flex items-center gap-3">
+          <NotificationBell userId={currentUser?.id} />
+          {!currentUser ? (
+            <a
+              href="/auth/login"
+              className="inline-flex h-12 px-6 items-center justify-center rounded-full bg-slate-900 text-white shadow-xl hover:scale-105 font-bold text-sm transition-all border border-white/20"
+            >
+              Log in
+            </a>
+          ) : (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="flex items-center gap-2 bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl rounded-full px-3 py-1.5 border border-white/40 shadow-black/10 hover:bg-white/60 transition-all ring-1 ring-black/5"
+                aria-label="User Menu"
+              >
+                {emailInitial}
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 mt-3 w-64 rounded-3xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl shadow-2xl border border-white/40 shadow-black/10 p-2 animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right ring-1 ring-black/5">
+                  <div className="text-xs font-bold text-slate-400 px-4 py-3 uppercase tracking-wider truncate">
+                    {currentUser.email}
+                  </div>
+                  <div className="p-1 space-y-1">
                     {effectiveIsAdmin && (
                       <>
                         <a
                           href="/admin/dashboard"
                           onClick={() => setMenuOpen(false)}
-                          className="mt-1 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-red-600 font-semibold hover:bg-red-50"
+                          className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-rose-600 font-bold hover:bg-rose-50/50 transition-colors"
                         >
                           <LayoutDashboard className="h-4 w-4" />
                           Admin Dashboard
@@ -283,11 +303,12 @@ export default function FloatingControls({
                             setMenuOpen(false);
                             onAddHomeClick?.();
                           }}
-                          className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-teal-700 font-semibold hover:bg-teal-50"
+                          className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-teal-700 font-bold hover:bg-teal-50/50 transition-colors"
                         >
                           <PlusCircle className="h-4 w-4" />
                           Add New Home
                         </button>
+                        <div className="h-px bg-slate-100 my-1 mx-2" />
                       </>
                     )}
                     <button
@@ -296,7 +317,7 @@ export default function FloatingControls({
                         setMenuOpen(false);
                         onOpenActivity?.();
                       }}
-                      className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                      className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-700 font-bold hover:bg-white/60 transition-colors"
                     >
                       <RefreshCw className="h-4 w-4" />
                       Activity Feed
@@ -307,7 +328,7 @@ export default function FloatingControls({
                         setMenuOpen(false);
                         onOpenInbox?.();
                       }}
-                      className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                      className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-slate-700 font-bold hover:bg-white/60 transition-colors"
                     >
                       <MessageCircle className="h-4 w-4" />
                       Messages
@@ -315,7 +336,7 @@ export default function FloatingControls({
                     <a
                       href="/my-follows"
                       onClick={() => setMenuOpen(false)}
-                      className="mt-1 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-slate-700 font-bold hover:bg-white/60 transition-colors"
                     >
                       <UserIcon className="h-4 w-4" />
                       My Follows
@@ -323,27 +344,176 @@ export default function FloatingControls({
                     <a
                       href="/my-homes"
                       onClick={() => setMenuOpen(false)}
-                      className="mt-1 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-slate-700 font-bold hover:bg-white/60 transition-colors"
                     >
                       <UserIcon className="h-4 w-4" />
                       My Dashboard
                     </a>
+                    <div className="h-px bg-slate-100 my-1 mx-2" />
                     <button
                       type="button"
                       onClick={handleLogoutClick}
-                      className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                      className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm text-rose-600 font-bold hover:bg-rose-50/50 transition-colors"
                     >
                       <LogOutIcon className="h-4 w-4" />
                       Log out
                     </button>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-
       </div>
+
+      {/* 3. BOTTOM RIGHT TOOL STACK - GLASSMORPHISM */}
+      <div className="absolute bottom-24 right-4 flex flex-col gap-3 z-[900] pointer-events-auto items-end">
+
+        {/* Layer Menu Popover (Compact, Left of Button) */}
+        {showLayerMenu && layers && (
+          <div className="absolute right-14 bottom-24 p-2 rounded-2xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 w-48 animate-in fade-in slide-in-from-right-2 duration-200 ring-1 ring-black/5 flex flex-col gap-1">
+            {/* Buzz */}
+            <button
+              onClick={() => handleToggleLayer('heat')}
+              className={`flex items-center justify-between w-full p-2 rounded-xl transition-all ${layers.heat ? "bg-purple-50 text-purple-900" : "hover:bg-slate-50 text-slate-600"}`}
+            >
+              <div className="flex items-center gap-2">
+                <Flame size={16} className={layers.heat ? "text-purple-600" : "text-slate-400"} />
+                <span className="text-sm font-bold">Buzz</span>
+              </div>
+              {layers.heat && <div className="h-2 w-2 rounded-full bg-purple-500" />}
+            </button>
+
+            {/* Schools */}
+            <button
+              onClick={() => handleToggleLayer('schools')}
+              className={`flex items-center justify-between w-full p-2 rounded-xl transition-all ${layers.schools ? "bg-blue-50 text-blue-900" : "hover:bg-slate-50 text-slate-600"}`}
+            >
+              <div className="flex items-center gap-2">
+                <GraduationCap size={16} className={layers.schools ? "text-blue-600" : "text-slate-400"} />
+                <span className="text-sm font-bold">Schools</span>
+              </div>
+              {layers.schools && <div className="h-2 w-2 rounded-full bg-blue-500" />}
+            </button>
+
+            {/* Transport */}
+            <button
+              onClick={() => handleToggleLayer('transport')}
+              className={`flex items-center justify-between w-full p-2 rounded-xl transition-all ${layers.transport ? "bg-emerald-50 text-emerald-900" : "hover:bg-slate-50 text-slate-600"}`}
+            >
+              <div className="flex items-center gap-2">
+                <TrainFront size={16} className={layers.transport ? "text-emerald-600" : "text-slate-400"} />
+                <span className="text-sm font-bold">Transport</span>
+              </div>
+              {layers.transport && <div className="h-2 w-2 rounded-full bg-emerald-500" />}
+            </button>
+
+            {/* Satellite (Disabled) */}
+            <button
+              disabled
+              className="flex items-center justify-between w-full p-2 rounded-xl opacity-50 cursor-not-allowed"
+            >
+              <div className="flex items-center gap-2">
+                <Satellite size={16} className="text-slate-300" />
+                <span className="text-sm font-bold text-slate-400">Satellite (Soon)</span>
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Legend Card (Slide-out) */}
+        {showLegend && (
+          <div className="absolute right-14 bottom-14 p-4 rounded-3xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl border border-white/40 shadow-2xl shadow-black/10 w-56 animate-in fade-in slide-in-from-right-4 duration-300 ring-1 ring-black/5">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Signal Guide</h4>
+            </div>
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-3">
+                <div className="w-3.5 h-3.5 rounded-full bg-teal-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">Open to Talking</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3.5 h-3.5 rounded-full bg-rose-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">For Sale</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">For Rent</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3.5 h-3.5 rounded-full bg-slate-500 shadow-sm border border-white/50"></div>
+                <span className="text-xs font-bold text-slate-700">Claimed</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3.5 h-3.5 rounded-full bg-white shadow-sm border border-slate-300"></div>
+                <span className="text-xs font-bold text-slate-700">Unclaimed</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Buttons Stack */}
+
+        {/* Layer Menu Toggle */}
+        <button
+          onClick={() => {
+            setShowLayerMenu(prev => !prev);
+            if (showLegend) onToggleLegend?.(); // Auto close legend if layers open
+          }}
+          className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl shadow-black/10 border border-white/40 ${showLayerMenu
+            ? "bg-slate-800 text-white"
+            : "bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 hover:scale-105"
+            }`}
+          title="Layers"
+        >
+          <Layers size={20} />
+        </button>
+
+        {/* Info / Legend */}
+        <button
+          onClick={() => {
+            onToggleLegend?.();
+            setShowLayerMenu(false); // Auto close layers if legend open
+          }}
+          className={`h-10 w-10 flex items-center justify-center rounded-xl transition-all shadow-xl shadow-black/10 border border-white/40 ${showLegend
+            ? "bg-slate-800 text-white"
+            : "bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 hover:scale-105"
+            }`}
+          title="Legend"
+        >
+          <Info size={20} />
+        </button>
+
+        {/* Locate Me */}
+        {onLocateMe && (
+          <button
+            onClick={onLocateMe}
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 shadow-xl shadow-black/10 border border-white/40 hover:scale-105 transition-all"
+            title="Locate Me"
+          >
+            <Locate size={20} />
+          </button>
+        )}
+
+        {/* Zoom In */}
+        <button
+          onClick={onZoomIn}
+          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 shadow-xl shadow-black/10 border border-white/40 hover:scale-105 transition-all"
+          title="Zoom In"
+        >
+          <Plus size={20} />
+        </button>
+
+        {/* Zoom Out */}
+        <button
+          onClick={onZoomOut}
+          className="h-10 w-10 flex items-center justify-center rounded-xl bg-white/40 dark:bg-stone-900/40 backdrop-blur-2xl text-slate-600 hover:text-slate-900 shadow-xl shadow-black/10 border border-white/40 hover:scale-105 transition-all"
+          title="Zoom Out"
+        >
+          <Minus size={20} />
+        </button>
+      </div>
+
     </div>
   );
 }

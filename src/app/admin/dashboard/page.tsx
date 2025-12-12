@@ -43,9 +43,19 @@ interface AdminClaim {
     postcode: string | null
 }
 
+interface PropertyFlag {
+    id: string
+    property_id: string
+    user_id: string | null
+    reason: string
+    details: string | null
+    status: string
+    created_at: string
+}
+
 // --- Main Page Component ---
 export default function AdminDashboardPage() {
-    const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'claims'>('overview')
+    const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'claims' | 'flags'>('overview')
     const [stats, setStats] = useState<AdminStats | null>(null)
     const [loading, setLoading] = useState(true)
     const [exporting, setExporting] = useState(false)
@@ -196,6 +206,12 @@ export default function AdminDashboardPage() {
                         icon={<ShieldAlert size={18} />}
                         label="Claims"
                     />
+                    <TabButton
+                        active={activeTab === 'flags'}
+                        onClick={() => setActiveTab('flags')}
+                        icon={<FileText size={18} />}
+                        label="Flags"
+                    />
                 </div>
 
                 {/* Content Area */}
@@ -203,6 +219,7 @@ export default function AdminDashboardPage() {
                     {activeTab === 'overview' && stats && <OverviewContent stats={stats} />}
                     {activeTab === 'users' && <UsersContent />}
                     {activeTab === 'claims' && <ClaimsContent />}
+                    {activeTab === 'flags' && <FlagsContent />}
                 </div>
             </div>
         </div>
@@ -567,6 +584,116 @@ function ClaimsContent() {
                                 </td>
                             </tr>
                         ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    )
+}
+
+function FlagsContent() {
+    const [flags, setFlags] = useState<PropertyFlag[]>([])
+    const [loading, setLoading] = useState(true)
+
+    const fetchFlags = async () => {
+        setLoading(true)
+        try {
+            const response = await fetch('/api/admin/flags?status=pending')
+            if (response.ok) {
+                const data = await response.json()
+                setFlags(data.data || [])
+            }
+        } catch (error) {
+            console.error('Error fetching flags:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    useEffect(() => {
+        fetchFlags()
+    }, [])
+
+    const handleAction = async (id: string, action: 'reviewed' | 'dismissed') => {
+        try {
+            await fetch(`/api/admin/flags/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: action })
+            })
+            setFlags(prev => prev.filter(f => f.id !== id))
+        } catch (error) {
+            console.error('Error updating flag:', error)
+            alert('Failed to update flag')
+        }
+    }
+
+    if (loading) return <div className="text-center p-12 text-slate-400">Loading flags...</div>
+
+    return (
+        <div className="rounded-2xl bg-white shadow-sm border border-slate-200 overflow-hidden">
+            <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-500">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-700">
+                        <tr>
+                            <th className="px-6 py-3">Property</th>
+                            <th className="px-6 py-3">Reported By</th>
+                            <th className="px-6 py-3">Reason</th>
+                            <th className="px-6 py-3">Details</th>
+                            <th className="px-6 py-3">Date</th>
+                            <th className="px-6 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {flags.length === 0 ? (
+                            <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center">
+                                    <div className="text-4xl mb-2">🎉</div>
+                                    <p className="text-slate-900 font-medium">No pending flags</p>
+                                    <p className="text-slate-400">All caught up!</p>
+                                </td>
+                            </tr>
+                        ) : (
+                            flags.map((flag) => (
+                                <tr key={flag.id} className="hover:bg-slate-50">
+                                    <td className="px-6 py-4">
+                                        <div className="font-medium text-slate-900 font-mono">
+                                            {flag.property_id.slice(0, 8)}...
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        {flag.user_id ? 'User' : 'Anonymous'}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold bg-amber-100 text-amber-700">
+                                            {flag.reason}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 max-w-xs truncate" title={flag.details || ''}>
+                                        {flag.details || '-'}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        {new Date(flag.created_at).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                                        <button
+                                            onClick={() => handleAction(flag.id, 'reviewed')}
+                                            className="text-emerald-600 hover:bg-emerald-50 p-1.5 rounded transition-colors"
+                                            title="Resolve"
+                                        >
+                                            <CheckCircle size={18} />
+                                        </button>
+                                        <button
+                                            onClick={() => handleAction(flag.id, 'dismissed')}
+                                            className="text-slate-400 hover:bg-slate-100 p-1.5 rounded transition-colors"
+                                            title="Dismiss"
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
                     </tbody>
                 </table>
             </div>

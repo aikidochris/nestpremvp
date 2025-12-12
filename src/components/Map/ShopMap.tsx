@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, Marker, Popup, TileLayer, useMap, ZoomControl, useMapEvents } from 'react-leaflet'
+import { MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import Supercluster from 'supercluster'
@@ -23,33 +23,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-export type MapProperty = {
-  id: string
-  uprn: string | null
-  postcode: string | null
-  street: string | null
-  house_number: string | null
-  lat: number
-  lon: number
-  price_estimate: number | null
-  claimed_by_user_id: string | null
-  is_claimed: boolean
-  is_open_to_talking: boolean
-  is_for_sale: boolean
-  is_for_rent: boolean
-  has_recent_activity: boolean
-  image_url?: string | null
-  last_sale_price?: number | null
-  last_sale_date?: string | null
-  energy_rating?: string | null
-  epc_floor_area?: number | null
-  epc_property_type?: string | null
-  signals?: {
-    is_for_sale: boolean
-    is_for_rent: boolean
-    soft_listing: boolean
-  }
-}
+import type { MapProperty } from '@/types/models'
 
 interface ShopMapProps {
   center?: [number, number]
@@ -99,12 +73,13 @@ function MapClickHandler({
   })
   return null
 }
-
+// ... (omitted helper components)
 
 const INDIVIDUAL_MARKER_ZOOM = 16
 const CLUSTER_MAX_ZOOM = 15
 
 function buildDisplayLabel(property: MapProperty) {
+  // ... (unchanged)
   const { house_number, street, postcode } = property
   if (house_number && street) {
     return `${house_number} ${street}${postcode ? `, ${postcode}` : ''}`
@@ -145,6 +120,7 @@ export default function ShopMap({
 }: ShopMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
 
+  // ... (state setup unchanged)
   // Poi Types
   const poiTypes = useMemo(() => {
     const types: string[] = []
@@ -157,7 +133,6 @@ export default function ShopMap({
   const [heatmapPoints, setHeatmapPoints] = useState<HeatmapPoint[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showLoadingBadge, setShowLoadingBadge] = useState(false)
-
 
   const [viewport, setViewport] = useState<{ north: number; south: number; east: number; west: number; zoom: number } | null>(null)
   const hasFitBounds = useRef(false)
@@ -177,6 +152,7 @@ export default function ShopMap({
   const [creating, setCreating] = useState(false)
 
   const handleCreateProperty = async () => {
+    // ... (unchanged)
     if (!newPropertyLoc) return
     setCreating(true)
     try {
@@ -184,7 +160,7 @@ export default function ShopMap({
         lat: newPropertyLoc.lat,
         lon: newPropertyLoc.lng,
         address_data: newPropertyData
-      })
+      } as any)
 
       if (error) throw error
 
@@ -203,7 +179,8 @@ export default function ShopMap({
     }
   }
 
-  // Reset fetch key when switching modes so we force a refresh
+  // ... (effects unchanged)
+  // Reset fetch key when switching modes
   useEffect(() => {
     lastFetchKey.current = null
   }, [heatmapMode, filters])
@@ -225,6 +202,7 @@ export default function ShopMap({
     },
     [filters, heatmapMode]
   )
+
 
   const propertyMap = useMemo(() => {
     const m = new Map<string, MapProperty>()
@@ -312,7 +290,6 @@ export default function ShopMap({
       return '#007C7C'
     }
     // Priority 3: Default / Unclaimed / No Signal -> Slate 500
-    // This ensures grey clusters are visible for density
     return '#64748B' // slate-500
   }
 
@@ -330,7 +307,7 @@ export default function ShopMap({
     return clusterIndex.getClusters([west, south, east, north], zoomLevel)
   }, [clusterIndex, map, zoomLevel, heatmapMode])
 
-  // Delay showing the loading badge to avoid flicker on quick pans/zooms
+  // ... (effects unchanged: Delay loading badge, fetchForBounds, debouncedFetch)
   useEffect(() => {
     let timeout: ReturnType<typeof setTimeout> | null = null
     if (isLoading) {
@@ -344,7 +321,9 @@ export default function ShopMap({
     }
   }, [isLoading])
 
+
   const fetchForBounds = useCallback(async () => {
+    // ... (unchanged)
     if (!map) return
     if (suppressFetchUntil.current > Date.now()) {
       return
@@ -377,7 +356,7 @@ export default function ShopMap({
 
     try {
       if (heatmapMode) {
-        // RPC Call for Heatmap
+        // ... (heatmap fetch unchanged)
         const params = {
           north: bounds.getNorth(),
           south: bounds.getSouth(),
@@ -391,13 +370,12 @@ export default function ShopMap({
 
         if (error) {
           console.error('[ShopMap] heatmap fetch error', JSON.stringify(error, null, 2))
-          // Fallback to empty array on error to prevent UI crash
           setHeatmapPoints([])
         } else {
           setHeatmapPoints(data as HeatmapPoint[] ?? [])
         }
       } else {
-        // Standard API Call
+        // ... (properties fetch unchanged)
         const params = new URLSearchParams()
         params.set('north', bounds.getNorth().toString())
         params.set('south', bounds.getSouth().toString())
@@ -491,12 +469,12 @@ export default function ShopMap({
     fetchForBounds()
   }, [fetchForBounds, map, refreshSignal])
 
-  const createSolidIcon = (color: string, size: number, isOwner: boolean) => {
+  const createSolidIcon = (color: string, size: number, isOwner: boolean, borderColor: string = '#fff') => {
     const borderWidth = isOwner ? 4 : 2
     const ring = isOwner ? 'box-shadow:0 0 0 2px rgba(0,0,0,0.1);' : ''
     return L.divIcon({
       html: `
-        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid #fff;${ring}background:${color};border-radius:9999px;" aria-hidden="true"></div>
+        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid ${borderColor};${ring}background:${color};border-radius:9999px;" aria-hidden="true"></div>
       `,
       className: 'nest-pin',
       iconSize: [size, size],
@@ -509,8 +487,8 @@ export default function ShopMap({
     const borderWidth = 2
     return L.divIcon({
       html: `
-        <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid ${borderColor};background:#ffffff;border-radius:9999px;" aria-hidden="true"></div>
-      `,
+          <div style="width:${size}px;height:${size}px;border:${borderWidth}px solid ${borderColor};background:#ffffff;border-radius:9999px;" aria-hidden="true"></div>
+        `,
       className: 'nest-pin',
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
@@ -523,10 +501,10 @@ export default function ShopMap({
     const size = count < 20 ? 40 : count < 100 ? 48 : 56
     return L.divIcon({
       html: `
-        <div class="rounded-full text-white font-bold flex items-center justify-center border-4 border-white shadow-xl transition-transform hover:scale-110 ${sizeClass}" style="background:${color}">
-          ${count}
-        </div>
-      `,
+          <div class="rounded-full text-white font-bold flex items-center justify-center border-4 border-white shadow-xl transition-transform hover:scale-110 ${sizeClass}" style="background:${color}">
+            ${count}
+          </div>
+        `,
       className: 'nest-cluster',
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
@@ -538,13 +516,17 @@ export default function ShopMap({
     const override = intentOverrides[property.id]
     const merged = override ? { ...property, ...override } : property
     const isOwner = !!currentUserId && merged.claimed_by_user_id === currentUserId
-    const isSale = merged.signals?.is_for_sale ?? merged.is_for_sale
-    const isRent = merged.signals?.is_for_rent ?? merged.is_for_rent
-    const isOpen = merged.signals?.soft_listing ?? merged.is_open_to_talking
+
+    // Priority: Override values > Direct property values > Signals
+    // (Overrides are already merged above)
+    const isSale = merged.is_for_sale ?? merged.signals?.is_for_sale ?? false
+    const isRent = merged.is_for_rent ?? merged.signals?.is_for_rent ?? false
+    const isOpen = merged.is_open_to_talking ?? merged.signals?.soft_listing ?? false
     const isClaimed = merged.is_claimed
 
+    // TRAFFIC LIGHT SYSTEM
     if (isSale) {
-      const icon = createSolidIcon('#E65F52', 20, isOwner)
+      const icon = createSolidIcon('#F43F5E', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isRent) {
@@ -552,20 +534,22 @@ export default function ShopMap({
       return { icon, zIndexOffset: isOwner ? 1000 : 600 }
     }
     if (isOpen) {
-      const icon = createSolidIcon('#007C7C', 20, isOwner)
+      const icon = createSolidIcon('#14B8A6', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 500 }
     }
     if (isClaimed) {
-      const icon = createSolidIcon('#475569', 18, isOwner)
+      const icon = createSolidIcon('#64748B', 20, isOwner)
       return { icon, zIndexOffset: isOwner ? 1000 : 400 }
     }
 
-    const icon = createRingIcon('#CBD5E1', 12)
+    // Unclaimed: White
+    const icon = createSolidIcon('#FFFFFF', 12, isOwner, '#CBD5E1')
     return { icon, zIndexOffset: 0 }
   }
 
   const handleClusterClick = useCallback(
     (cluster: any) => {
+      // ... (unchanged)
       if (!map) return
       const expansionZoom = clusterIndex.getClusterExpansionZoom(cluster.id)
       const [lon, lat] = cluster.geometry.coordinates
@@ -640,21 +624,6 @@ export default function ShopMap({
           }
         }}
       >
-        <Popup>
-          <div className="p-3 min-w-[220px]">
-            <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
-            <p className="text-sm text-stone-600 mb-3">{address}</p>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onShopClick?.(displayProperty)
-              }}
-              className="w-full px-3 py-1.5 bg-[#007C7C] text-white rounded-full hover:bg-[#006868] text-sm font-medium transition-colors"
-            >
-              View home
-            </button>
-          </div>
-        </Popup>
       </Marker>
     )
   }
@@ -692,21 +661,6 @@ export default function ShopMap({
             }
           }}
         >
-          <Popup>
-            <div className="p-3 min-w-[220px]">
-              <h3 className="font-bold text-lg text-stone-900 mb-1">{label}</h3>
-              <p className="text-sm text-stone-600 mb-3">{address}</p>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onShopClick?.(displayProperty)
-                }}
-                className="w-full px-3 py-1.5 bg-[#007C7C] text-white rounded-full hover:bg-[#006868] text-sm font-medium transition-colors"
-              >
-                View home
-              </button>
-            </div>
-          </Popup>
         </Marker>
       )
     })
@@ -741,7 +695,7 @@ export default function ShopMap({
             onSetIsAddingHome?.(false)
           }}
         />
-        <ZoomControl position="bottomright" />
+
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors & Carto'
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"

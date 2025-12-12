@@ -46,7 +46,17 @@ interface MessageState {
   text: string
 }
 
-type TabType = 'pending' | 'approved' | 'rejected'
+interface PropertyFlag {
+  id: string
+  property_id: string
+  user_id: string | null
+  reason: string
+  details: string | null
+  status: string
+  created_at: string
+}
+
+type TabType = 'pending' | 'approved' | 'rejected' | 'flags'
 
 export default function AdminDashboard() {
   const router = useRouter()
@@ -62,6 +72,8 @@ export default function AdminDashboard() {
   const [editingShop, setEditingShop] = useState<Shop | null>(null)
   const [editFormData, setEditFormData] = useState<Partial<Shop>>({})
   const [isSaving, setIsSaving] = useState(false)
+  const [flags, setFlags] = useState<PropertyFlag[]>([])
+  const [flagsCount, setFlagsCount] = useState(0)
 
   useEffect(() => {
     fetchData()
@@ -81,10 +93,23 @@ export default function AdminDashboard() {
     }
   }
 
+  const fetchFlags = async () => {
+    try {
+      const response = await fetch('/api/admin/flags?status=pending')
+      if (response.ok) {
+        const data = await response.json()
+        setFlags(data.data || [])
+        setFlagsCount(data.data?.length || 0)
+      }
+    } catch (error) {
+      console.error('Error fetching flags:', error)
+    }
+  }
+
   const fetchData = async () => {
     try {
       setIsLoading(true)
-      
+
       // Fetch user, all submissions, and stats
       const [userRes, pendingData, approvedData, rejectedData, shopsRes, pendingCountRes, approvedCountRes, rejectedCountRes] = await Promise.all([
         fetch('/api/auth/user'),
@@ -96,6 +121,9 @@ export default function AdminDashboard() {
         fetch('/api/submissions?status=approved&count=true'),
         fetch('/api/submissions?status=rejected&count=true')
       ])
+
+      // Also fetch flags
+      await fetchFlags()
 
       if (userRes.ok) {
         const userData = await userRes.json()
@@ -141,7 +169,7 @@ export default function AdminDashboard() {
   const handleAction = async (submissionId: string, action: 'approve' | 'reject') => {
     const loadingKey = `${submissionId}-${action}`
     setLoading(prev => ({ ...prev, [loadingKey]: true }))
-    
+
     try {
       const response = await fetch('/api/submissions/approve', {
         method: 'POST',
@@ -161,7 +189,7 @@ export default function AdminDashboard() {
       }
 
       showMessage('success', `Submission ${action}d successfully!`)
-      
+
       // Refresh the page data
       await fetchData()
     } catch (error) {
@@ -180,16 +208,16 @@ export default function AdminDashboard() {
       if (!response.ok) {
         throw new Error('Failed to fetch shops')
       }
-      
+
       const data = await response.json()
       const shop = data.data?.find((s: Shop) =>
         s.name === submission.name && s.address === submission.address
       )
-      
+
       if (!shop) {
         throw new Error('Shop not found. It may not have been created yet.')
       }
-      
+
       setEditingShop(shop)
       setEditFormData({
         name: shop.name,
@@ -210,7 +238,7 @@ export default function AdminDashboard() {
 
   const handleSaveEdit = async () => {
     if (!editingShop) return
-    
+
     setIsSaving(true)
     try {
       const response = await fetch(`/api/shops/${editingShop.id}`, {
@@ -230,7 +258,7 @@ export default function AdminDashboard() {
       showMessage('success', 'Shop updated successfully!')
       setEditingShop(null)
       setEditFormData({})
-      
+
       // Refresh the page data
       await fetchData()
     } catch (error) {
@@ -262,11 +290,10 @@ export default function AdminDashboard() {
       {/* Message Toast */}
       {message && (
         <div className="fixed top-4 right-4 z-50 animate-slide-in">
-          <div className={`px-6 py-4 rounded-xl shadow-2xl border-2 ${
-            message.type === 'success'
-              ? 'bg-green-50 border-green-500 text-green-800'
-              : 'bg-red-50 border-red-500 text-red-800'
-          }`}>
+          <div className={`px-6 py-4 rounded-xl shadow-2xl border-2 ${message.type === 'success'
+            ? 'bg-green-50 border-green-500 text-green-800'
+            : 'bg-red-50 border-red-500 text-red-800'
+            }`}>
             <div className="flex items-center gap-3">
               <span className="text-2xl">{message.type === 'success' ? '✅' : '❌'}</span>
               <p className="font-semibold">{message.text}</p>
@@ -348,43 +375,49 @@ export default function AdminDashboard() {
                 <span className="text-2xl">📋</span>
                 <h2 className="text-2xl font-bold text-gray-900">Submissions</h2>
               </div>
-              
+
               {/* Tab Buttons */}
               <div className="flex gap-2 bg-gray-100 p-1 rounded-xl">
                 <button
                   onClick={() => setActiveTab('pending')}
-                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${
-                    activeTab === 'pending'
-                      ? 'bg-amber-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${activeTab === 'pending'
+                    ? 'bg-amber-500 text-white shadow-lg'
+                    : 'text-gray-600 hover:text-gray-900'
+                    }`}
                 >
                   ⏳ Pending ({stats.pendingCount})
                 </button>
                 <button
                   onClick={() => setActiveTab('approved')}
-                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${
-                    activeTab === 'approved'
-                      ? 'bg-green-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${activeTab === 'approved'
+                    ? 'bg-green-500 text-white shadow-lg'
+                    : 'text-gray-600 hover:text-gray-900'
+                    }`}
                 >
                   ✅ Approved ({stats.approvedCount})
                 </button>
                 <button
                   onClick={() => setActiveTab('rejected')}
-                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${
-                    activeTab === 'rejected'
-                      ? 'bg-red-500 text-white shadow-lg'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${activeTab === 'rejected'
+                    ? 'bg-red-500 text-white shadow-lg'
+                    : 'text-gray-600 hover:text-gray-900'
+                    }`}
                 >
                   ❌ Rejected ({stats.rejectedCount})
+                </button>
+                <button
+                  onClick={() => setActiveTab('flags')}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${activeTab === 'flags'
+                    ? 'bg-amber-600 text-white shadow-lg'
+                    : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                >
+                  🚩 Flags ({flagsCount})
                 </button>
               </div>
             </div>
           </div>
-          
+
           {/* Pending Tab Content */}
           {activeTab === 'pending' && (
             <>
@@ -399,13 +432,13 @@ export default function AdminDashboard() {
                             <span>📍</span>
                             <span>{submission.address}</span>
                           </p>
-                          
+
                           {submission.description && (
                             <p className="text-sm text-gray-700 mb-4 p-3 bg-gray-100 rounded-lg">
                               {submission.description}
                             </p>
                           )}
-                          
+
                           {/* Crypto Badges */}
                           <div className="flex flex-wrap gap-2 mb-4">
                             {submission.crypto_accepted?.map((crypto) => (
@@ -417,7 +450,7 @@ export default function AdminDashboard() {
                               </span>
                             ))}
                           </div>
-                          
+
                           {/* Images */}
                           {submission.submission_images && submission.submission_images.length > 0 && (
                             <div className="flex gap-3 mb-4">
@@ -431,13 +464,13 @@ export default function AdminDashboard() {
                               ))}
                             </div>
                           )}
-                          
+
                           <div className="text-xs text-gray-500 flex items-center gap-2">
                             <span>🕒</span>
                             <span>Submitted {new Date(submission.created_at).toLocaleDateString()}</span>
                           </div>
                         </div>
-                        
+
                         {/* Action Buttons */}
                         <div className="flex lg:flex-col gap-3">
                           <button
@@ -488,7 +521,7 @@ export default function AdminDashboard() {
               )}
             </>
           )}
-          
+
           {/* Approved Tab Content */}
           {activeTab === 'approved' && (
             <>
@@ -506,13 +539,13 @@ export default function AdminDashboard() {
                             <span>📍</span>
                             <span>{submission.address}</span>
                           </p>
-                          
+
                           {submission.description && (
                             <p className="text-sm text-gray-700 mb-4 p-3 bg-gray-100 rounded-lg">
                               {submission.description}
                             </p>
                           )}
-                          
+
                           {/* Crypto Badges */}
                           <div className="flex flex-wrap gap-2 mb-4">
                             {submission.crypto_accepted?.map((crypto) => (
@@ -524,7 +557,7 @@ export default function AdminDashboard() {
                               </span>
                             ))}
                           </div>
-                          
+
                           {/* Images */}
                           {submission.submission_images && submission.submission_images.length > 0 && (
                             <div className="flex gap-3 mb-4">
@@ -538,13 +571,13 @@ export default function AdminDashboard() {
                               ))}
                             </div>
                           )}
-                          
+
                           <div className="text-xs text-gray-500 flex items-center gap-2">
                             <span>🕒</span>
                             <span>Submitted {new Date(submission.created_at).toLocaleDateString()}</span>
                           </div>
                         </div>
-                        
+
                         {/* Edit Button */}
                         <div className="flex lg:flex-col gap-3">
                           <button
@@ -568,7 +601,7 @@ export default function AdminDashboard() {
               )}
             </>
           )}
-          
+
           {/* Rejected Tab Content */}
           {activeTab === 'rejected' && (
             <>
@@ -586,13 +619,13 @@ export default function AdminDashboard() {
                             <span>📍</span>
                             <span>{submission.address}</span>
                           </p>
-                          
+
                           {submission.description && (
                             <p className="text-sm text-gray-700 mb-4 p-3 bg-gray-100 rounded-lg">
                               {submission.description}
                             </p>
                           )}
-                          
+
                           {/* Crypto Badges */}
                           <div className="flex flex-wrap gap-2 mb-4">
                             {submission.crypto_accepted?.map((crypto) => (
@@ -604,7 +637,7 @@ export default function AdminDashboard() {
                               </span>
                             ))}
                           </div>
-                          
+
                           {/* Images */}
                           {submission.submission_images && submission.submission_images.length > 0 && (
                             <div className="flex gap-3 mb-4">
@@ -618,7 +651,7 @@ export default function AdminDashboard() {
                               ))}
                             </div>
                           )}
-                          
+
                           <div className="text-xs text-gray-500 flex items-center gap-2">
                             <span>🕒</span>
                             <span>Submitted {new Date(submission.created_at).toLocaleDateString()}</span>
@@ -633,6 +666,80 @@ export default function AdminDashboard() {
                   <div className="text-6xl mb-4">📭</div>
                   <p className="text-xl font-bold text-gray-900 mb-2">No rejected submissions</p>
                   <p className="text-sm text-gray-600">Rejected submissions will appear here</p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Flags Tab Content */}
+          {activeTab === 'flags' && (
+            <>
+              {flags && flags.length > 0 ? (
+                <div className="divide-y divide-gray-200">
+                  {flags.map((flag) => (
+                    <div key={flag.id} className="p-6 hover:bg-amber-50 transition-colors">
+                      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="px-2 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded">{flag.reason}</span>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-3 flex items-center gap-2">
+                            <span>🏠</span>
+                            <span>Property: {flag.property_id.slice(0, 8)}...</span>
+                          </p>
+
+                          {flag.details && (
+                            <p className="text-sm text-gray-700 mb-4 p-3 bg-gray-100 rounded-lg">
+                              {flag.details}
+                            </p>
+                          )}
+
+                          <div className="text-xs text-gray-500 flex items-center gap-2">
+                            <span>🕒</span>
+                            <span>Reported {new Date(flag.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex lg:flex-col gap-3">
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/admin/flags/${flag.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ status: 'reviewed' })
+                              })
+                              fetchFlags()
+                            }}
+                            className="flex-1 lg:flex-none px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 hover:shadow-lg transition-all text-sm font-bold flex items-center justify-center gap-2"
+                          >
+                            <span>✅</span>
+                            <span>Resolve</span>
+                          </button>
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/admin/flags/${flag.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ status: 'dismissed' })
+                              })
+                              fetchFlags()
+                            }}
+                            className="flex-1 lg:flex-none px-6 py-3 bg-gray-600 text-white rounded-xl hover:bg-gray-700 hover:shadow-lg transition-all text-sm font-bold flex items-center justify-center gap-2"
+                          >
+                            <span>🗑️</span>
+                            <span>Dismiss</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-16 text-center">
+                  <div className="text-6xl mb-4">🎉</div>
+                  <p className="text-xl font-bold text-gray-900 mb-2">No pending flags</p>
+                  <p className="text-sm text-gray-600">All property reports have been reviewed</p>
                 </div>
               )}
             </>

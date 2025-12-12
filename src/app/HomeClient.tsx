@@ -509,6 +509,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
     setClaiming(true)
 
+    // Step 1: Insert claim record
     const { error } = await supabase
       .from('property_claims')
       .insert([{
@@ -517,12 +518,29 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         status: 'claimed',
       }] as any)
 
-    setClaiming(false)
-
     if (error) {
+      setClaiming(false)
       setClaimError(error.message)
       return
     }
+
+    // Step 2 (CRITICAL): Upsert intent_flags to make claim visible on map
+    const { error: intentError } = await supabase
+      .from('intent_flags')
+      .upsert({
+        property_id: selectedHome.id,
+        owner_id: currentUser.id,
+        soft_listing: false, // Default to "Settled" (not open to talking)
+        is_for_sale: false,
+        is_for_rent: false
+      } as any, { onConflict: 'property_id' })
+
+    if (intentError) {
+      console.error('[handleClaimHome] Failed to create intent_flags:', intentError)
+      // Continue anyway - claim was successful, just visibility might be affected
+    }
+
+    setClaiming(false)
 
     const { data: latest, error: latestError } = await supabase
       .from('property_claims')
@@ -534,7 +552,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
     if (!latestError) {
       setClaimRecord(latest ?? null)
-      
+
       // 3. Fetch Unclaimed Notes (New Logic)
       const { count: noteCount, error: noteError } = await supabase
         .from('unclaimed_notes')
@@ -543,26 +561,29 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         .eq('status', 'pending')
 
       // Immediately update selectedHome
-      setSelectedHome(prev => prev ? { 
-          ...prev, 
-          is_claimed: true, 
-          claimed_by_user_id: currentUser.id
+      setSelectedHome(prev => prev ? {
+        ...prev,
+        is_claimed: true,
+        claimed_by_user_id: currentUser.id
       } : prev)
-      
+
       // Update Shops array
-      setShops(prev => prev.map(p => p.id === selectedHome.id ? { 
-          ...p, 
-          is_claimed: true, 
-          claimed_by_user_id: currentUser.id
+      setShops(prev => prev.map(p => p.id === selectedHome.id ? {
+        ...p,
+        is_claimed: true,
+        claimed_by_user_id: currentUser.id
       } : p))
+
+      // Step 3: Refresh map to pick up new intent_flags
+      setMapRefreshSignal(s => s + 1)
 
       // 🎉 Celebration & Toast
       fireCelebration()
-      
+
       if (!noteError && noteCount && noteCount > 0) {
-           setClaimToast(`Claimed! You have ${noteCount} neighbor note${noteCount > 1 ? 's' : ''} waiting.`)
+        setClaimToast(`Claimed! You have ${noteCount} neighbor note${noteCount > 1 ? 's' : ''} waiting.`)
       } else {
-           setClaimToast('Welcome Home! Your property is now claimed.')
+        setClaimToast('Welcome Home! Your property is now claimed.')
       }
 
       setTimeout(() => setClaimToast(null), 5000)
@@ -669,6 +690,31 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const isGraduated = profileStrength === 100
 
   const statusSet = !!intentOverrides[selectedHome?.id || '']?.status_confirmed
+
+  const handlePropertyUpdate = (updatedProperty: MapProperty) => {
+    // 1. Update selectedHome if it matches
+    if (selectedHome?.id === updatedProperty.id) {
+      setSelectedHome(current => current ? { ...current, ...updatedProperty } : null)
+    }
+
+    // 2. Update shops array
+    setShops(prev => prev.map(p => p.id === updatedProperty.id ? { ...p, ...updatedProperty } : p))
+
+    // 3. CRITICAL: Update intentOverrides to force Map Pin update
+    setIntentOverrides(prev => ({
+      ...prev,
+      [updatedProperty.id]: {
+        ...prev[updatedProperty.id],
+        is_for_sale: updatedProperty.is_for_sale,
+        is_for_rent: updatedProperty.is_for_rent,
+        is_open_to_talking: updatedProperty.is_open_to_talking,
+        is_claimed: updatedProperty.is_claimed,
+        claimed_by_user_id: updatedProperty.claimed_by_user_id,
+        // Override status confirmed if passed, though usually controlled by local toggle
+        status_confirmed: true
+      }
+    }))
+  }
 
   const handleVerifyFactsClick = () => {
     // Scroll to editor (it's right there, maybe just focus?)
@@ -1544,7 +1590,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
             <AnimatePresence>
               {!isExpanded && (
                 <SmallCard
-                  key="small-card"
+                  key={`small-card-${selectedHome!.id}`}
                   property={selectedHome!}
                   onExpand={() => setIsExpanded(true)}
                   onClose={() => setSelectedHome(null)}
@@ -1552,7 +1598,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
               )}
               {isExpanded && (
                 <ExpandedCard
-                  key="expanded-card"
+                  key={`expanded-card-${selectedHome!.id}`}
                   property={selectedHome!}
                   onClose={() => {
                     setIsExpanded(false)
@@ -1561,6 +1607,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                   onBack={() => setIsExpanded(false)}
                   onClaim={handleClaimHome}
                   onSelectNeighbor={setSelectedHome}
+                  onUpdate={handlePropertyUpdate}
                 />
               )}
             </AnimatePresence>

@@ -11,44 +11,44 @@ import type { Database } from './database.types'
  * - private/{propertyId}/{albumName}/*
  */
 export async function uploadPropertyImage(
-  supabase: SupabaseClient<Database>,
-  propertyId: string,
-  albumName: string, // 'hero' treated as public, others private
-  files: File[]
+    supabase: SupabaseClient<Database>,
+    propertyId: string,
+    albumName: string, // 'hero' treated as public, others private
+    files: File[]
 ): Promise<string[]> {
-  const bucket = 'property-images'
-  const isPublic = albumName === 'hero'
-  const basePath = isPublic ? `public/${propertyId}/hero` : `private/${propertyId}/${albumName}`
-  
-  const uploadedUrls: string[] = []
+    const bucket = 'property-images'
+    const isPublic = albumName === 'hero'
+    const basePath = isPublic ? `public/${propertyId}/hero` : `private/${propertyId}/${albumName}`
 
-  for (const file of files) {
-    const ext = file.name.includes('.') ? file.name.split('.').pop() : undefined
-    const safeExt = ext ? `.${ext}` : ''
-    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}${safeExt}`
-    const filePath = `${basePath}/${fileName}`
+    const uploadedUrls: string[] = []
 
-    const { error: uploadError } = await supabase.storage
-      .from(bucket)
-      .upload(filePath, file, { upsert: false })
+    for (const file of files) {
+        const ext = file.name.includes('.') ? file.name.split('.').pop() : undefined
+        const safeExt = ext ? `.${ext}` : ''
+        const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}${safeExt}`
+        const filePath = `${basePath}/${fileName}`
 
-    if (uploadError) {
-        console.error('Upload Error:', uploadError)
-        throw new Error(uploadError.message)
+        const { error: uploadError } = await supabase.storage
+            .from(bucket)
+            .upload(filePath, file, { upsert: false })
+
+        if (uploadError) {
+            console.error('Upload Error:', uploadError)
+            throw new Error(uploadError.message)
+        }
+
+        if (isPublic) {
+            const { data } = supabase.storage.from(bucket).getPublicUrl(filePath)
+            uploadedUrls.push(data.publicUrl)
+        } else {
+            // Private uploads don't return a URL immediately, caller must request signed URL later
+            // Or we can return a temporary signed URL now for UI feedback
+            const { data } = await supabase.storage.from(bucket).createSignedUrl(filePath, 3600) // 1 hour
+            if (data?.signedUrl) uploadedUrls.push(data.signedUrl)
+        }
     }
 
-    if (isPublic) {
-        const { data } = supabase.storage.from(bucket).getPublicUrl(filePath)
-        uploadedUrls.push(data.publicUrl)
-    } else {
-        // Private uploads don't return a URL immediately, caller must request signed URL later
-        // Or we can return a temporary signed URL now for UI feedback
-        const { data } = await supabase.storage.from(bucket).createSignedUrl(filePath, 3600) // 1 hour
-        if (data?.signedUrl) uploadedUrls.push(data.signedUrl)
-    }
-  }
-
-  return uploadedUrls
+    return uploadedUrls
 }
 
 export async function listAlbums(
@@ -72,10 +72,10 @@ export async function listAlbums(
     // However, if we uploaded `private/id/album/file`, `list(private/id)` should return `album` as a folder (if using delimiter? default list recursive is false).
     // The response `data` contains `name` and metadata. 
     // If it's a folder, `id` is null (sometimes) or we just see the name.
-    
+
     // Actually, checking Supabase Storage API:
     // .list('folder') returns items in that folder. Subfolders appear as items.
-    
+
     return data
         .filter(item => !item.name.startsWith('.')) // Hide .emptyFolderPlaceholder
         .map(item => item.name)
@@ -103,7 +103,7 @@ export async function listAlbumFiles(
     const files = await Promise.all(data.map(async (file) => {
         const filePath = `${basePath}/${file.name}`
         let url = ''
-        
+
         if (isPublic) {
             const { data: pubData } = supabase.storage.from(bucket).getPublicUrl(filePath)
             url = pubData.publicUrl
@@ -120,4 +120,16 @@ export async function listAlbumFiles(
     }))
 
     return files
+}
+
+/**
+ * Upload images for home story (hero images)
+ * This is an alias for uploadPropertyImage with 'hero' album
+ */
+export async function uploadHomeStoryImages(
+    supabase: SupabaseClient<Database>,
+    propertyId: string,
+    files: File[]
+): Promise<string[]> {
+    return uploadPropertyImage(supabase, propertyId, 'hero', files)
 }

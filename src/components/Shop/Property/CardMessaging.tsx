@@ -5,6 +5,7 @@ import { useMessaging } from '@/hooks/useMessaging'
 import { usePropertyAlbums } from '@/hooks/usePropertyAlbums'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import MessageBubble from './MessageBubble'
+import InboxList from './Messaging/InboxList'
 
 interface CardMessagingProps {
     propertyId: string
@@ -15,7 +16,7 @@ interface CardMessagingProps {
 
 export default function CardMessaging({ propertyId, ownerId, currentUserId, isSettled }: CardMessagingProps) {
     const isOwner = currentUserId === ownerId
-    
+
     // Owner Inbox State
     const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
     const [inboxThreads, setInboxThreads] = useState<any[]>([])
@@ -29,33 +30,64 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
 
     // We only call useMessaging if we are ready (Buyer or Owner+Selected)
     // Actually, useMessaging handles "fetching" inside.
-    const { thread, messages, isLoading, isSending, startThread, sendMessage } = useMessaging(
-        propertyId, 
+    const { thread, messages, setMessages, isLoading, isSending, startThread, sendMessage } = useMessaging(
+        propertyId,
         currentUserId,
         isOwner ? selectedThreadId || undefined : undefined
     )
-    
+
     const { getAlbums } = usePropertyAlbums(propertyId)
-    
+
     const [inputValue, setInputValue] = useState('')
     const [isExpanded, setIsExpanded] = useState(false)
     const [showAlbumSelector, setShowAlbumSelector] = useState(false)
     const [availableAlbums, setAvailableAlbums] = useState<string[]>([])
-    
+
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    // Fetch Owner Threads (Inbox List)
+    // Fetch Owner Threads (Inbox List) with last message preview
     useEffect(() => {
         if (isOwner && isExpanded && !selectedThreadId) {
             setLoadingInbox(true)
             const supabase = getSupabaseClient()
+
+            // Fetch threads with nested last message
             supabase
                 .from('message_threads')
-                .select('*')
+                .select(`
+                    *,
+                    messages (
+                        content,
+                        created_at,
+                        sender_id
+                    )
+                `)
                 .eq('property_id', propertyId)
                 .order('last_message_at', { ascending: false })
                 .then(({ data, error }) => {
-                    if (data) setInboxThreads(data)
+                    if (error) {
+                        console.error('[CardMessaging] Failed to fetch inbox:', error)
+                        setLoadingInbox(false)
+                        return
+                    }
+
+                    // Process to extract last message
+                    const threadsWithPreview = (data || []).map((thread: any) => {
+                        const messages = (thread.messages || []) as Array<{ content: string, created_at: string, sender_id: string }>
+                        // Sort messages by created_at desc to get latest
+                        const sortedMsgs = [...messages].sort((a, b) =>
+                            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                        )
+                        const lastMsg = sortedMsgs[0]
+
+                        return {
+                            ...thread,
+                            last_message: lastMsg?.content || null,
+                            messages: undefined // Remove large array
+                        }
+                    })
+
+                    setInboxThreads(threadsWithPreview)
                     setLoadingInbox(false)
                 })
         }
@@ -71,18 +103,18 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
     // Auto-scroll to bottom of messages
     useEffect(() => {
         if (isExpanded && (thread || !isOwner)) {
-             // Only auto-scroll if we are in a thread view
+            // Only auto-scroll if we are in a thread view
             messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
         }
     }, [messages, isExpanded, thread, isOwner])
 
     const handleSend = async () => {
         if (!inputValue.trim()) return
-        
+
         const content = inputValue
         setInputValue('') // Clear input immediately
 
-        // Optimistic UI
+        // Optimistic UI: Create temp message and add to state BEFORE API call
         const tempId = 'temp-' + Date.now()
         const tempMsg = {
             id: tempId,
@@ -90,28 +122,14 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
             sender_id: currentUserId,
             content: content,
             created_at: new Date().toISOString(),
-            is_read: false
+            is_read: false,
+            status: 'sent' as const
         }
-       
-       // Force update if we have access to setMessages (We don't exposed it from hook? Check hook.)
-       // Actually, the hook 'sendMessage' usually handles this or we need to mutate 'messages' via useSWR or similar.
-       // Looking at useMessaging, it returns 'messages' state. We can't mutate it directly from here unless we hacked it or the hook exposed a setter.
-       // However, 'sendMessage' in the hook MIGHT do it. Let's assume we need to rely on the hook to do optimistic updates if possible, 
-       // OR we just wait for real-time subscription.
-       // If "Invisible" is the bug, it means Realtime isn't triggering or fetch is slow.
-       // Let's rely on standard 'sendMessage' but ensure it returns the message so we can verify success?
-       // WAIT: task requirement says "Implement Optimistic Updates".
-       // If 'useMessaging' owns the state, we should probably modify 'useMessaging' or just accept that we need to wait.
-       // BUT, we can't modify the hook state from here easily without exposing `setMessages`.
-       // Let's modify the hook efficiently later? Or just trust `sendMessage` does it?
-       // Actually, looking at `useMessaging.ts` (from memory), it probably uses a simple `useEffect` fetch.
-       // We should rely on `sendMessage` to trigger a re-fetch or subscription update.
-       // IF the user insists on Optimistic here, we need `setMessages` exposed from the hook.
-       
-       // Let's Assume we can't change the hook interface deeply right now without touching another file.
-       // Recommendation: Trust the backend fetch for now, BUT ensure we are actually calling it.
-       
-       if (!thread && !isOwner) {
+
+        // Add optimistic message to UI immediately
+        setMessages(prev => [...prev, tempMsg as any])
+
+        if (!thread && !isOwner) {
             await startThread(content, ownerId)
         } else {
             await sendMessage(content)
@@ -125,16 +143,16 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
         let threadId = thread?.id
 
         if (!threadId) {
-             // Owner can't start thread with themselves currently in this flow
-             // Assume thread exists if in Owner Mode (selectedThreadId)
-             // Safety check
-             if (isOwner) return 
-             
+            // Owner can't start thread with themselves currently in this flow
+            // Assume thread exists if in Owner Mode (selectedThreadId)
+            // Safety check
+            if (isOwner) return
+
             // Buyer Start logic
             const newThread = await startThread(content, ownerId)
             if (!newThread) return
             threadId = newThread.id
-        } 
+        }
 
         // Insert Share Record
         const { error } = await supabase.from('album_shares').insert({
@@ -153,6 +171,63 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
         }
 
         setShowAlbumSelector(false)
+    }
+
+    // Handle Reply to Note (Convert note to chat thread)
+    const handleReplyToNote = async (note: { id: string; sender_user_id: string; message: string; created_at: string }) => {
+        const supabase = getSupabaseClient()
+
+        // Step 1: Create a new thread with the note sender as buyer
+        const { data: newThread, error: threadError } = await supabase
+            .from('message_threads')
+            .insert({
+                property_id: propertyId,
+                owner_id: currentUserId, // Current user is owner
+                buyer_id: note.sender_user_id,
+                state: 'talking'
+            })
+            .select()
+            .single()
+
+        if (threadError || !newThread) {
+            console.error('[handleReplyToNote] Failed to create thread:', threadError)
+            alert('Failed to start conversation')
+            return
+        }
+
+        // Step 2: Send auto-reply message  
+        const { error: msgError } = await supabase
+            .from('messages')
+            .insert({
+                thread_id: newThread.id,
+                sender_id: currentUserId,
+                content: 'Thanks for your note! I saw your message and wanted to connect.',
+                status: 'sent'
+            })
+
+        if (msgError) {
+            console.error('[handleReplyToNote] Failed to send message:', msgError)
+        }
+
+        // Step 3: Mark note as revealed
+        const { error: noteError } = await supabase
+            .from('unclaimed_notes')
+            .update({ is_revealed: true, status: 'revealed' })
+            .eq('id', note.id)
+
+        if (noteError) {
+            console.error('[handleReplyToNote] Failed to update note:', noteError)
+        }
+
+        // Step 4: Optimistically add new thread to inbox
+        setInboxThreads(prev => [{
+            ...newThread,
+            last_message: 'Thanks for your note! I saw your message and wanted to connect.',
+            last_message_at: new Date().toISOString()
+        }, ...prev])
+
+        // Open the new thread immediately
+        setSelectedThreadId(newThread.id)
     }
 
     if (isLoading && !isOwner) {
@@ -182,10 +257,10 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
             </div>
         )
     }
-    
+
     // Owner Button (Simplified)
     if (!isExpanded && isOwner) {
-         return (
+        return (
             <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">
                 <button
                     onClick={() => setIsExpanded(true)}
@@ -206,12 +281,12 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
                 <div className="flex items-center gap-2">
                     {/* Back Button for Owner Inbox */}
                     {isOwner && selectedThreadId && (
-                         <button onClick={() => setSelectedThreadId(null)} className="p-1 hover:bg-slate-100 rounded-full">
-                             <ChevronLeft size={16} className="text-slate-500"/>
-                         </button>
+                        <button onClick={() => setSelectedThreadId(null)} className="p-1 hover:bg-slate-100 rounded-full">
+                            <ChevronLeft size={16} className="text-slate-500" />
+                        </button>
                     )}
                     <span className="text-xs font-bold uppercase text-slate-500">
-                        {isOwner 
+                        {isOwner
                             ? (selectedThreadId ? 'Chat' : 'Owner Inbox')
                             : (thread ? 'Conversation' : 'Start a Conversation')
                         }
@@ -227,47 +302,18 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
 
             {/* OWNER INBOX LIST */}
             {isOwner && !selectedThreadId ? (
-                <div className="flex-1 overflow-y-auto p-2">
-                    {/* Unclaimed Notes Pin */}
-                    {/* We need to know if there are unclaimed notes. We can pass a prop or fetch. 
-                        For now, let's rely on 'inboxThreads' OR specific prop. 
-                        Since we didn't add the prop yet, let's add a placeholder comment or check if we can. 
-                        Actually, let's just make the inbox strictly 'message_threads' for now to avoid breaking interface.
-                        We will handle the "Zero State" perfectly.
-                    */}
-                    
-                    {loadingInbox ? (
-                        <div className="text-center text-xs text-slate-400 py-4">Loading threads...</div>
-                    ) : inboxThreads.length === 0 ? (
-                         <div className="flex flex-col items-center justify-center h-40 text-center px-4">
-                             <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-2">
-                                 <MessageCircle className="text-slate-400" size={20} />
-                             </div>
-                             <p className="text-sm font-bold text-slate-600 dark:text-slate-300">No messages yet</p>
-                             <p className="text-xs text-slate-400 mt-1 max-w-[200px]">
-                                Set your status to <span className="text-teal-500 font-semibold">Open to Chat</span> to encourage neighbors to say hi.
-                             </p>
-                         </div>
-                    ) : (
-                        inboxThreads.map(t => (
-                            <button 
-                                key={t.id}
-                                onClick={() => setSelectedThreadId(t.id)}
-                                className="w-full p-3 mb-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm hover:shadow-md text-left transition-all group"
-                            >
-                                <div className="flex justify-between mb-1">
-                                    <span className="text-xs font-bold text-slate-700 dark:text-slate-200 group-hover:text-indigo-500 transition-colors">Neighbor</span> 
-                                    <span className="text-[10px] text-slate-400">
-                                        {new Date(t.last_message_at).toLocaleDateString()}
-                                    </span>
-                                </div>
-                                <div className="text-xs text-slate-500 truncate font-medium">
-                                    Click to view conversation
-                                </div>
-                            </button>
-                        ))
-                    )}
-                </div>
+                <InboxList
+                    threads={inboxThreads.map(t => ({
+                        id: t.id,
+                        buyer_id: t.buyer_id || '',
+                        buyer_name: t.buyer_name,
+                        last_message: t.last_message,
+                        last_message_at: t.last_message_at,
+                        unread_count: t.unread_count
+                    }))}
+                    isLoading={loadingInbox}
+                    onSelectThread={setSelectedThreadId}
+                />
             ) : (
                 /* CHAT VIEW (Buyer or Owner Specific Thread) */
                 <>
@@ -283,10 +329,10 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
                                 const isMe = msg.sender_id === currentUserId
                                 return (
                                     <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                        <MessageBubble 
-                                            message={msg} 
-                                            isMe={isMe} 
-                                            propertyId={propertyId} 
+                                        <MessageBubble
+                                            message={msg}
+                                            isMe={isMe}
+                                            propertyId={propertyId}
                                         />
                                     </div>
                                 )
@@ -298,7 +344,7 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
                     {/* Input Area */}
                     <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 relative">
                         {/* Album Popover code remains same */}
-                         <AnimatePresence>
+                        <AnimatePresence>
                             {showAlbumSelector && (
                                 <motion.div
                                     initial={{ opacity: 0, y: 10 }}
@@ -330,7 +376,7 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
                         </AnimatePresence>
 
                         <div className="flex gap-2">
-                             {/* Share Button (Owners Only) */}
+                            {/* Share Button (Owners Only) */}
                             {isOwner && (
                                 <button
                                     onClick={() => setShowAlbumSelector(!showAlbumSelector)}

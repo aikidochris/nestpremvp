@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     const LIMIT = 15000
     const hasBounds = !Number.isNaN(north) && !Number.isNaN(south)
 
-    // FIX: Select ALL enrichment columns
+    // Select columns from the view - summary_text now included via home_story join in view
     let query = supabase
       .from('property_public_view')
       .select(`
@@ -40,7 +40,9 @@ export async function GET(req: Request) {
         claimed_by_user_id,
         is_open_to_talking,
         is_for_sale,
-        is_for_rent
+        is_for_rent,
+        market_image_url,
+        summary_text
       `)
 
     // Bounds Filter

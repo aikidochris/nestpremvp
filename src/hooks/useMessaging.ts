@@ -36,7 +36,7 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
                 .from('message_threads')
                 .select('*')
                 .eq('property_id', propertyId)
-                .eq('buyer_id', currentUserId)
+                .eq('buyer_id', currentUserId!)
                 .limit(1)
                 .maybeSingle()
             data = result.data
@@ -71,10 +71,46 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
         setIsLoading(false)
     }, [propertyId, currentUserId, specificThreadId, supabase])
 
-    // Load on mount if users exists
+    // Load on mount if user exists
     useEffect(() => {
         fetchThread()
     }, [fetchThread])
+
+    // Realtime subscription for new messages
+    useEffect(() => {
+        if (!thread?.id) return
+
+        const channel = supabase
+            .channel(`messages:${thread.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'messages',
+                    filter: `thread_id=eq.${thread.id}`
+                },
+                (payload) => {
+                    const newMsg = payload.new as DBMessage
+                    // Avoid duplicates (in case optimistic UI already added it)
+                    setMessages(prev => {
+                        const exists = prev.some(m => m.id === newMsg.id || (m.id.startsWith('temp-') && m.content === newMsg.content))
+                        if (exists) {
+                            // Replace temp message with real one
+                            return prev.map(m =>
+                                m.id.startsWith('temp-') && m.content === newMsg.content ? newMsg : m
+                            )
+                        }
+                        return [...prev, newMsg]
+                    })
+                }
+            )
+            .subscribe()
+
+        return () => {
+            supabase.removeChannel(channel)
+        }
+    }, [thread?.id, supabase])
 
     // Create thread and send first message
     const startThread = async (content: string, ownerId: string) => {
@@ -131,7 +167,10 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
 
     // Send generic message in existing thread
     const sendMessage = async (content: string) => {
-        if (!thread || !currentUserId) return
+        if (!thread || !currentUserId) {
+            console.warn('[sendMessage] Missing thread or currentUserId', { thread: !!thread, currentUserId: !!currentUserId })
+            return
+        }
 
         setIsSending(true)
 
@@ -146,7 +185,10 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
             .select()
             .single()
 
-        if (!error && newMessage) {
+        if (error) {
+            console.error('[sendMessage] Failed to insert message:', error)
+        } else if (newMessage) {
+            console.log('[sendMessage] Message saved successfully:', newMessage.id)
             setMessages(prev => [...prev, newMessage])
         }
         setIsSending(false)
@@ -155,6 +197,7 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
     return {
         thread,
         messages,
+        setMessages,
         isLoading,
         isSending,
         startThread,

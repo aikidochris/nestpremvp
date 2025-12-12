@@ -242,22 +242,26 @@ export default function ShopMap({
 
   const geojsonPoints = useMemo(
     () =>
-      properties.map((p) => ({
-        type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: [p.lon, p.lat],
-        },
-        properties: {
-          id: p.id,
-          is_claimed: p.is_claimed,
-          is_open_to_talking: p.is_open_to_talking,
-          is_for_sale: p.is_for_sale,
-          is_for_rent: p.is_for_rent,
-          has_recent_activity: p.has_recent_activity,
-        },
-      })),
-    [properties]
+      properties.map((p) => {
+        const override = intentOverrides[p.id]
+        const merged = override ? { ...p, ...override } : p
+        return {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [merged.lon, merged.lat],
+          },
+          properties: {
+            id: merged.id,
+            is_claimed: merged.is_claimed,
+            is_open_to_talking: merged.is_open_to_talking,
+            is_for_sale: merged.is_for_sale,
+            is_for_rent: merged.is_for_rent,
+            has_recent_activity: merged.has_recent_activity,
+          },
+        }
+      }),
+    [properties, intentOverrides]
   )
 
   const clusterIndex = useMemo(() => {
@@ -392,7 +396,13 @@ export default function ShopMap({
         const json = await res.json()
 
         if (!res.ok) {
-          console.error('[ShopMap] error from /api/properties', json)
+          console.error('[ShopMap] API error:', json?.error || res.statusText)
+          return
+        }
+
+        // Guard against missing or invalid data
+        if (!json.data || !Array.isArray(json.data)) {
+          console.error('[ShopMap] Invalid API response - expected data array:', json)
           return
         }
 
@@ -404,6 +414,8 @@ export default function ShopMap({
               is_for_rent: item?.is_for_rent ?? false,
               soft_listing: item?.is_open_to_talking ?? false,
             }
+            // Flatten home_story join data
+            const summaryText = item?.home_story?.summary_text ?? item?.summary_text ?? null
             return {
               ...item,
               signals,
@@ -411,7 +423,8 @@ export default function ShopMap({
               is_for_sale: signals.is_for_sale,
               is_for_rent: signals.is_for_rent,
               is_open_to_talking: signals.soft_listing,
-              image_url: item?.images?.[0] ?? null,
+              image_url: item?.market_image_url ?? item?.images?.[0] ?? null,
+              summary_text: summaryText,
             }
           })
           const prevIds = prev.map((p) => p.id).join('|')

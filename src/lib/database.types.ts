@@ -1174,6 +1174,7 @@ export type Database = {
           price_estimate: number | null
           property_id: string | null
           street: string | null
+          summary_text: string | null
           town: string | null
         }
         Relationships: []

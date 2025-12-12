@@ -21,7 +21,11 @@ export async function middleware(request: NextRequest) {
         }
     )
 
-    await supabase.auth.getUser()
+    try {
+        await supabase.auth.getUser()
+    } catch (e) {
+        // Ignore auth errors in middleware to allow public access
+    }
     return response
 }
 

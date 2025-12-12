@@ -5,7 +5,7 @@ import type { Database } from '@/lib/database.types'
 
 type DBMessage = Database['public']['Tables']['messages']['Row']
 
-export function useMessaging(propertyId: string, currentUserId?: string) {
+export function useMessaging(propertyId: string, currentUserId?: string, specificThreadId?: string) {
     const [thread, setThread] = useState<MessageThread | null>(null)
     const [messages, setMessages] = useState<DBMessage[]>([])
     const [isLoading, setIsLoading] = useState(false)
@@ -14,23 +14,36 @@ export function useMessaging(propertyId: string, currentUserId?: string) {
 
     // Fetch or find active thread
     const fetchThread = useCallback(async () => {
-        if (!currentUserId || !propertyId) return
+        if (!currentUserId && !specificThreadId) return
+        if (!propertyId) return
 
         setIsLoading(true)
 
-        // Find existing thread between buyer and owner for this property
-        // Note: For now assuming 1-1 thread per property per buyer
-        const { data, error } = await supabase
-            .from('message_threads')
-            .select('*')
-            .eq('property_id', propertyId)
-            .eq('buyer_id', currentUserId)
-            .limit(1)
-            .maybeSingle()
+        let data, error
+
+        if (specificThreadId) {
+            // Fetch specific thread (Owner View)
+            const result = await supabase
+                .from('message_threads')
+                .select('*')
+                .eq('id', specificThreadId)
+                .single()
+            data = result.data
+            error = result.error
+        } else {
+            // Find existing thread between buyer and owner (Buyer View)
+            const result = await supabase
+                .from('message_threads')
+                .select('*')
+                .eq('property_id', propertyId)
+                .eq('buyer_id', currentUserId)
+                .limit(1)
+                .maybeSingle()
+            data = result.data
+            error = result.error
+        }
 
         if (!error && data) {
-            // Adapt DB shape to MessageThread interface if needed, or use DB shape directly
-            // For now, mapping broadly
             const mappedThread: MessageThread = {
                 id: data.id,
                 property_id: data.property_id,
@@ -56,7 +69,7 @@ export function useMessaging(propertyId: string, currentUserId?: string) {
             setMessages([])
         }
         setIsLoading(false)
-    }, [propertyId, currentUserId, supabase])
+    }, [propertyId, currentUserId, specificThreadId, supabase])
 
     // Load on mount if users exists
     useEffect(() => {
@@ -65,7 +78,7 @@ export function useMessaging(propertyId: string, currentUserId?: string) {
 
     // Create thread and send first message
     const startThread = async (content: string, ownerId: string) => {
-        if (!currentUserId) return
+        if (!currentUserId) return null
 
         setIsSending(true)
 
@@ -84,7 +97,7 @@ export function useMessaging(propertyId: string, currentUserId?: string) {
         if (threadError || !newThread) {
             console.error('Failed to create thread', threadError)
             setIsSending(false)
-            return
+            return null
         }
 
         // 2. Send Message
@@ -113,6 +126,7 @@ export function useMessaging(propertyId: string, currentUserId?: string) {
         }
 
         setIsSending(false)
+        return newThread // Return the DB thread object
     }
 
     // Send generic message in existing thread

@@ -2,28 +2,36 @@
 
 import { MapPin } from 'lucide-react'
 
+interface Badge {
+    label: string
+    color: string
+    textColor: string
+}
+
 interface CardHeaderProps {
     title: string
     subtitle?: string
-    statusBadge?: {
-        label: string
-        color: string
-        textColor: string
-    } | null
+    badges?: Badge[]
+    statusBadge?: Badge | null // Deprecated but kept for backward compatibility if needed temporarily
 }
 
-export default function CardHeader({ title, subtitle, statusBadge }: CardHeaderProps) {
+export default function CardHeader({ title, subtitle, badges, statusBadge }: CardHeaderProps) {
+    // Merge new 'badges' prop with old 'statusBadge' if provided
+    const allBadges = badges || (statusBadge ? [statusBadge] : [])
+
     return (
         <div className="flex flex-col gap-1">
             <div className="flex items-start justify-between gap-2">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 leading-tight">
                     {title}
                 </h3>
-                {statusBadge && (
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide shrink-0 ${statusBadge.color} ${statusBadge.textColor}`}>
-                        {statusBadge.label}
-                    </span>
-                )}
+                <div className="flex flex-wrap gap-1 justify-end">
+                    {allBadges.map((badge, idx) => (
+                        <span key={idx} className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide shrink-0 ${badge.color} ${badge.textColor}`}>
+                            {badge.label}
+                        </span>
+                    ))}
+                </div>
             </div>
             {subtitle && (
                 <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400 text-xs">

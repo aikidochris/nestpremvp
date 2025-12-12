@@ -534,14 +534,38 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
     if (!latestError) {
       setClaimRecord(latest ?? null)
-      // Immediately update selectedHome so hero transitions to "Add a photo"
-      setSelectedHome(prev => prev ? { ...prev, is_claimed: true, claimed_by_user_id: currentUser.id } : prev)
-      // Also update in the shops array for map consistency
-      setShops(prev => prev.map(p => p.id === selectedHome.id ? { ...p, is_claimed: true, claimed_by_user_id: currentUser.id } : p))
-      // 🎉 Celebration effect!
+      
+      // 3. Fetch Unclaimed Notes (New Logic)
+      const { count: noteCount, error: noteError } = await supabase
+        .from('unclaimed_notes')
+        .select('*', { count: 'exact', head: true })
+        .eq('property_id', selectedHome.id)
+        .eq('status', 'pending')
+
+      // Immediately update selectedHome
+      setSelectedHome(prev => prev ? { 
+          ...prev, 
+          is_claimed: true, 
+          claimed_by_user_id: currentUser.id
+      } : prev)
+      
+      // Update Shops array
+      setShops(prev => prev.map(p => p.id === selectedHome.id ? { 
+          ...p, 
+          is_claimed: true, 
+          claimed_by_user_id: currentUser.id
+      } : p))
+
+      // 🎉 Celebration & Toast
       fireCelebration()
-      setClaimToast('Welcome Home! You now own this pin.')
-      setTimeout(() => setClaimToast(null), 4000)
+      
+      if (!noteError && noteCount && noteCount > 0) {
+           setClaimToast(`Claimed! You have ${noteCount} neighbor note${noteCount > 1 ? 's' : ''} waiting.`)
+      } else {
+           setClaimToast('Welcome Home! Your property is now claimed.')
+      }
+
+      setTimeout(() => setClaimToast(null), 5000)
     }
   }
 

@@ -11,17 +11,24 @@ export function useCurrentUser() {
         let mounted = true
 
         async function loadUser() {
-            setAuthLoading(true)
-            const { data, error } = await supabase.auth.getUser()
-            if (!mounted) return
+            setAuthLoading(true) 
+            try {
+                const { data, error } = await supabase.auth.getUser()
+                if (!mounted) return
 
-            if (!error) {
-                setCurrentUser(data.user ?? null)
-            } else {
-                console.error('[Auth] getUser error', error)
-                setCurrentUser(null)
+                if (!error) {
+                    setCurrentUser(data.user ?? null)
+                } else {
+                    // Suppress error log for expected "Auth session missing" in guest mode
+                    // console.error('[Auth] getUser error', error) 
+                    setCurrentUser(null)
+                }
+            } catch (err) {
+                console.warn('[Auth] Session missing or unexpected error', err)
+                if (mounted) setCurrentUser(null)
+            } finally {
+                if (mounted) setAuthLoading(false)
             }
-            setAuthLoading(false)
         }
 
         const { data: subscription } = supabase.auth.onAuthStateChange(

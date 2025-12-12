@@ -30,6 +30,7 @@ export interface MapProperty {
         is_for_rent: boolean
         soft_listing: boolean
     }
+    summary_text?: string | null
 }
 
 

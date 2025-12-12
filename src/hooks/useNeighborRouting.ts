@@ -38,12 +38,13 @@ export function useNeighborRouting(targetProperty: MapProperty) {
             // For now, let's try a simple bounding box query from public view
             // +1/-1 lat/lon is huge, so we create a small window.
             // 0.002 degrees is roughly 200m
-            const RANGE = 0.005
+            const RANGE = 0.002
 
             const { data, error } = await supabase
                 .from('property_public_view')
                 .select('*')
                 .eq('is_claimed', true) // Only claimed neighbors
+                .or('is_open_to_talking.eq.true,is_for_sale.eq.true') // Must be Open OR For Sale
                 .gte('lat', targetProperty.lat - RANGE)
                 .lte('lat', targetProperty.lat + RANGE)
                 .gte('lon', targetProperty.lon - RANGE)
@@ -64,7 +65,7 @@ export function useNeighborRouting(targetProperty: MapProperty) {
                 }))
                 .filter(p => p.id !== targetProperty.id) // Exclude self if claimed
                 .sort((a, b) => a.dist - b.dist)
-                .slice(0, 5) // Top 5 closest
+                .slice(0, 3) // Top 3 closest
 
             if (mounted) {
                 setNeighbors(sorted)

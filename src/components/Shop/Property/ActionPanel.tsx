@@ -7,6 +7,9 @@ import { CardMode } from '@/types/social'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import CardMessaging from './CardMessaging'
 
+import { MapProperty } from '@/types/models'
+import NeighborRouting from './NeighborRouting'
+
 interface ActionPanelProps {
     mode: CardMode
     isSettled?: boolean
@@ -17,6 +20,8 @@ interface ActionPanelProps {
     onLayoutChange?: () => void // Optional callback to help parent re-measure height if needed
     onClaim?: () => void
     onNoteSent?: () => void // New callback to trigger neighbor routing
+    neighbors?: MapProperty[]
+    onSelectNeighbor?: (neighbor: MapProperty) => void
 }
 
 export default function ActionPanel({
@@ -28,7 +33,9 @@ export default function ActionPanel({
     onMessageOwner,
     onLayoutChange,
     onClaim,
-    onNoteSent
+    onNoteSent,
+    neighbors = [],
+    onSelectNeighbor
 }: ActionPanelProps) {
     const [isNoteOpen, setIsNoteOpen] = useState(false)
     const [noteContent, setNoteContent] = useState('')
@@ -55,11 +62,15 @@ export default function ActionPanel({
         if (!error) {
             setNoteSent(true)
             onNoteSent?.() // Trigger neighbor routing
-            setTimeout(() => {
-                setIsNoteOpen(false)
-                setNoteSent(false)
-                setNoteContent('')
-            }, 3000)
+            
+            // Only auto-close if NO neighbors are found to route to
+            if (!neighbors || neighbors.length === 0) {
+                setTimeout(() => {
+                    setIsNoteOpen(false)
+                    setNoteSent(false)
+                    setNoteContent('')
+                }, 3000)
+            }
         } else {
             alert('Failed to send note. Please try again.')
         }
@@ -136,9 +147,28 @@ export default function ActionPanel({
                                     </button>
                                 </>
                             ) : (
-                                <div className="py-4 flex flex-col items-center justify-center text-emerald-600 dark:text-emerald-400">
-                                    <span className="font-bold text-lg">Note Sent!</span>
-                                    <span className="text-xs text-slate-500">It will be waiting for the owner when they join.</span>
+                                <div className="py-4 flex flex-col items-center justify-center text-emerald-600 dark:text-emerald-400 space-y-4">
+                                    <div className="text-center">
+                                        <span className="font-bold text-lg">Note Sent!</span>
+                                        <div className="text-xs text-slate-500">It will be waiting for the owner.</div>
+                                    </div>
+                                    
+                                    {neighbors && neighbors.length > 0 && onSelectNeighbor && (
+                                        <NeighborRouting 
+                                            neighbors={neighbors} 
+                                            onSelect={onSelectNeighbor} 
+                                        />
+                                    )}
+
+                                    {/* Manual close if neighbours are shown, otherwise handled by timer */}
+                                    {neighbors && neighbors.length > 0 && (
+                                        <button 
+                                            onClick={() => setIsNoteOpen(false)}
+                                            className="text-xs text-slate-400 hover:text-slate-600 underline"
+                                        >
+                                            Close
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </motion.div>

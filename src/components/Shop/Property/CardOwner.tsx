@@ -2,9 +2,10 @@
 
 import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Image as ImageIcon, Lock, Upload, Plus, ChevronRight, X, PenTool, Save } from 'lucide-react'
+import { Image as ImageIcon, Lock, Upload, Plus, ChevronRight, X, PenTool, Save, MessageCircle } from 'lucide-react'
 import { MapProperty } from '@/types/models'
 import IntentControls from './IntentControls'
+import CardMessaging from './CardMessaging'
 import { getSupabaseClient } from '@/lib/supabaseClient'
 import { usePropertyAlbums } from '@/hooks/usePropertyAlbums'
 
@@ -188,6 +189,23 @@ export default function CardOwner({ property, currentUser, onClose, onIntentChan
                             isForRent={property.is_for_rent || false}
                             isSoftListing={property.is_open_to_talking || false}
                             onIntentChange={onIntentChange}
+                        />
+                    </div>
+                </section>
+
+                {/* 0.5. Inbox */}
+                <section>
+                    <div className="mb-2 flex items-center gap-2">
+                        <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+                            <MessageCircle size={16} />
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">Inbox</h3>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden text-left">
+                        <CardMessaging
+                            propertyId={property.id}
+                            ownerId={currentUser.id}
+                            currentUserId={currentUser.id}
                         />
                     </div>
                 </section>

@@ -13,10 +13,12 @@ create table if not exists notifications (
 -- RLS
 alter table notifications enable row level security;
 
+DROP POLICY IF EXISTS "Users can view their own notifications" ON notifications;
 create policy "Users can view their own notifications"
   on notifications for select
   using (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update their own notifications" ON notifications;
 create policy "Users can update their own notifications"
   on notifications for update
   using (auth.uid() = user_id);

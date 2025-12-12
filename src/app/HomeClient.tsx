@@ -12,8 +12,7 @@ import { uploadHomeStoryImages } from '@/lib/storage'
 import type { MapProperty } from '@/types/models'
 import type { Database } from '../lib/database.types'
 import FloatingControls from '@/components/Map/FloatingControls'
-import InboxModal from '@/components/Messaging/InboxModal'
-import { useInbox } from '@/hooks/useInbox'
+
 import FollowButton from '@/components/Social/FollowButton'
 import { usePropertyFollows } from '@/hooks/usePropertyFollows'
 import FilterModal, { FilterState } from '@/components/UI/FilterModal'
@@ -123,12 +122,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
   // Message state moved to MessageModal, we just track open state here
 
-  const [pendingRequestCount, setPendingRequestCount] = useState<number>(0)
-  const [pendingNotesOpen, setPendingNotesOpen] = useState(false)
-  const [pendingNotes, setPendingNotes] = useState<any[]>([])
-  const [pendingNotesLoading, setPendingNotesLoading] = useState(false)
-  const [pendingNotesError, setPendingNotesError] = useState<string | null>(null)
-  const [isInboxOpen, setIsInboxOpen] = useState(false)
   const [isActivityOpen, setIsActivityOpen] = useState(false)
   const [currentBounds, setCurrentBounds] = useState<L.LatLngBounds | null>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -159,36 +152,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     transport: false,
   })
 
-  const refreshPendingRequestCount = useCallback(async (userId: string | null | undefined, propertyId: string | null | undefined) => {
-    if (!userId || !propertyId) {
-      setPendingRequestCount((prev) => (prev === 0 ? prev : 0))
-      lastPendingUserKeyRef.current = null
-      return
-    }
-
-    const key = `${userId}|${propertyId}`
-    if (lastPendingUserKeyRef.current === key) return
-    lastPendingUserKeyRef.current = key
-
-    const { count, error } = await (supabase as any)
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('property_id', propertyId)
-      .neq('sender_id', userId)
-      .in('status', ['unread', 'pending_request'])
-
-    if (error) {
-      console.error('Error fetching pending requests count', error)
-      return
-    }
-    setPendingRequestCount((prev) => {
-      const next = count ?? 0
-      return prev === next ? prev : next
-    })
-  }, [supabase])
-
-  const { threads, loading: inboxLoading, partnerProfiles, sendMessage: inboxSendMessage, markThreadRead } = useInbox(currentUser?.id ?? null)
-
   // Filters
   const [showFilters, setShowFilters] = useState(false)
   const [filters, setFilters] = useState<FilterState>({
@@ -199,13 +162,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
     claimed: false,
   })
 
-  useEffect(() => {
-    if (currentUser) {
-      refreshPendingRequestCount(currentUser.id, undefined)
-    } else {
-      setPendingRequestCount(0)
-    }
-  }, [currentUser, refreshPendingRequestCount])
+
 
   const calculateDistance = useCallback((lat1: number, lon1: number, lat2: number, lon2: number): number => {
     const R = 6371
@@ -262,12 +219,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
       setMessageModalMode(undefined)
       setAdminEditMode(false)
       setAdminEditData(null)
-      setIsInboxOpen(false)
-      setPendingNotesOpen(false)
-      setPendingNotes([])
-      setPendingNotesLoading(false)
-      setPendingNotesError(null)
-      setPendingRequestCount(0)
+
       setLocalForSale(false)
       setLocalForRent(false)
       setIntentForId(null)
@@ -601,88 +553,6 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   }
 
   // Image handlers moved to HomeStorySection
-
-  const handleViewPendingNotes = async () => {
-    if (!currentUser) return
-    setPendingNotesLoading(true)
-    setPendingNotesError(null)
-    const { data, error } = await (supabase as any)
-      .from('messages')
-      .select('*')
-      .eq('receiver_id', currentUser.id)
-      .eq('status', 'pending_request')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Error loading pending notes', error)
-      setPendingNotesError('Unable to load notes right now.')
-      setPendingNotes([])
-    } else {
-      setPendingNotes(data ?? [])
-    }
-    setPendingNotesOpen(true)
-    setPendingNotesLoading(false)
-    setIsInboxOpen(true)
-  }
-
-  const handleReplyToPendingNote = async (note: any) => {
-    if (!note || !currentUser) return
-
-    if (note.status === 'pending_request') {
-      const confirmSwitch = window.confirm('Switch your status to Open to Talking to start this conversation?')
-      if (!confirmSwitch) return
-
-      const { error: intentError } = await (supabase as any)
-        .from('intent_flags')
-        .upsert(
-          {
-            property_id: note.property_id,
-            owner_id: currentUser.id,
-            soft_listing: true,
-            is_for_sale: false,
-            is_for_rent: false,
-          },
-          { onConflict: 'property_id' }
-        )
-
-      if (intentError) {
-        console.error('Error updating intent flags for reply', intentError)
-        alert('Could not enable conversations right now.')
-        return
-      }
-
-      if (selectedHome?.id === note.property_id) {
-        setIsOpenToTalking(true)
-        setLocalForSale(false)
-        setLocalForRent(false)
-        setIntentForId(note.property_id)
-        applyIntentOverride(note.property_id, {
-          is_open_to_talking: true,
-          is_for_sale: false,
-          is_for_rent: false,
-          claimed_by_user_id: currentUser.id,
-          is_claimed: true,
-        })
-      }
-
-      setMapRefreshSignal((s) => s + 1)
-    }
-
-    const { error: markError } = await (supabase as any)
-      .from('messages')
-      .update({ status: 'read' })
-      .eq('id', note.id)
-
-    if (markError) {
-      console.error('Error marking note as read', markError)
-      alert('Could not mark this note as read.')
-      return
-    }
-
-    setPendingNotes((prev) => prev.filter((n) => n.id !== note.id))
-    setPendingRequestCount((count) => Math.max(0, count - 1))
-    alert('Status updated to Open to Talking. You can now continue the conversation from Messages.')
-  }
 
   // Use centralized logic
   const strengthResult = calculateProfileStrength(selectedHome, intentOverrides[selectedHome?.id || ''] || {}, heroImage)
@@ -1134,18 +1004,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
   const messageCtaMode: MessageMode = effectiveIntentFlags.sale || effectiveIntentFlags.rent || effectiveIntentFlags.open ? 'direct' : 'note'
   const messageButtonLabel = messageCtaMode === 'direct' ? 'Message owner' : 'Leave interest note'
   const canMessageOwner = !!(selectedHome && !isClaimedByYou && (selectedHome.is_claimed || claimRecord))
-
-  useEffect(() => {
-    const userId = currentUser?.id ?? null
-    const propertyId = isClaimedByYou ? selectedHome?.id ?? null : null
-    if (!userId || !propertyId) {
-      setPendingRequestCount((prev) => (prev === 0 ? prev : 0))
-      lastPendingUserKeyRef.current = null
-      return
-    }
-    refreshPendingRequestCount(userId, propertyId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id])
+  // Removed pendingRequestCount useEffect since state is removed
 
   const selectedHomeTitle = selectedHome
     ? (`${selectedHome?.house_number ?? ''} ${selectedHome?.street ?? ''} `.trim() ||
@@ -1258,10 +1117,10 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
   useEffect(() => {
     const propertyId = searchParams?.get('propertyId')
-    const openInbox = searchParams?.get('openInbox') === 'true'
+    // Removed openInbox check
     if (!propertyId) return
     if (!mapReady || !mapRef.current) return
-    if (deepLinkHandledRef.current === propertyId && !openInbox) return
+    if (deepLinkHandledRef.current === propertyId) return
 
     const fetchProperty = async (): Promise<MapProperty | null> => {
       const existing = shops.find((s) => s.id === propertyId)
@@ -1293,14 +1152,13 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
 
       setSelectedHome(target)
       mapRef.current?.flyTo([target.lat, target.lon], 16, { animate: true, duration: 1 })
-      if (openInbox) setIsInboxOpen(true)
 
       deepLinkHandledRef.current = propertyId
 
       if (typeof window !== 'undefined' && window.history?.replaceState) {
         const url = new URL(window.location.href)
         url.searchParams.delete('propertyId')
-        url.searchParams.delete('openInbox')
+        url.searchParams.delete('openInbox') // keep cleanup just in case
         const nextSearch = url.searchParams.toString()
         window.history.replaceState(null, '', nextSearch ? `${url.pathname}?${nextSearch} ` : url.pathname)
       }
@@ -1440,7 +1298,7 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
         onToggleList={() => setIsListOpen((prev) => !prev)}
         currentUser={currentUser}
         onLogout={handleLogout}
-        onOpenInbox={() => setIsInboxOpen(true)}
+        // Removed onOpenInbox
         onOpenActivity={() => setIsActivityOpen(true)}
         layers={layerState}
         onLayerChange={(newLayers) => {
@@ -1885,109 +1743,44 @@ export default function HomeClient({ shops: initialShops, user: _user, isAdmin, 
                 </button>
               )}
 
-              {isClaimedByYou && pendingRequestCount > 0 && (
-                <div className="rounded-xl border border-teal-100 bg-teal-50 p-4 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-[#007C7C]">
-                      <Bell className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-[#007C7C]">
-                        {pendingRequestCount} {pendingRequestCount === 1 ? 'person has' : 'people have'} left notes for you.
-                      </p>
-                      <p className="text-xs text-[#007C7C]">Open them when you are ready to reply.</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#007C7C] shadow-sm hover:bg-teal-100"
-                    onClick={handleViewPendingNotes}
-                  >
-                    View
-                  </button>
-                </div>
-              )}
-
               <div className="space-y-2">
                 <h4 className="text-sm font-semibold text-slate-900">What are your plans?</h4>
                 {renderOwnershipControls()}
               </div>
 
-              {claimError && (
-                <div className="text-sm text-red-600">
-                  {claimError}
+              {selectedHome && (
+                <MessageModal
+                  isOpen={isMessageModalOpen}
+                  initialMode={messageModalMode}
+                  onClose={() => setIsMessageModalOpen(false)}
+                  selectedHome={selectedHome}
+                  currentUser={currentUser}
+                  intentFlags={computeIntentFlags()}
+                />
+              )}
+
+              {selectedHome && (
+                <FlagModal
+                  isOpen={isFlagModalOpen}
+                  onClose={() => setIsFlagModalOpen(false)}
+                  propertyId={selectedHome.id}
+                  userId={currentUser?.id}
+                />
+              )}
+
+              {/* Claim Toast */}
+              {claimToast && (
+                <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
+                  <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2">
+                    <span className="text-xl">🏠</span>
+                    <span className="font-semibold">{claimToast}</span>
+                  </div>
                 </div>
               )}
-
-              {!propertyIsClaimed && (
-                <p className="text-xs text-gray-500">
-                  Claim this home to mark it as open to conversations.
-                </p>
-              )}
-
-              <HomeStorySection
-                selectedHome={selectedHome!}
-                currentUser={currentUser}
-                isClaimedByYou={isClaimedByYou}
-              />
-
-              <div className="mt-8 text-center">
-                <button
-                  onClick={() => setIsFlagModalOpen(true)}
-                  className="text-xs text-slate-400 hover:text-rose-500 underline cursor-pointer"
-                >
-                  Flag this home
-                </button>
-              </div>
             </div>
           </div>
         )
       }
-
-      <InboxModal
-        open={isInboxOpen}
-        onClose={() => {
-          setIsInboxOpen(false)
-        }}
-        threads={threads}
-        loading={inboxLoading}
-        currentUserId={currentUserId ?? null}
-        partnerProfiles={partnerProfiles}
-        onSend={async (propertyId, body, receiverId) => {
-          await inboxSendMessage(propertyId, body, receiverId ?? null, 'unread')
-        }}
-        onMarkRead={(propertyId, partnerId) => markThreadRead(propertyId, partnerId)}
-      />
-
-      {selectedHome && (
-        <MessageModal
-          isOpen={isMessageModalOpen}
-          initialMode={messageModalMode}
-          onClose={() => setIsMessageModalOpen(false)}
-          selectedHome={selectedHome}
-          currentUser={currentUser}
-          intentFlags={computeIntentFlags()}
-        />
-      )}
-
-      {selectedHome && (
-        <FlagModal
-          isOpen={isFlagModalOpen}
-          onClose={() => setIsFlagModalOpen(false)}
-          propertyId={selectedHome.id}
-          userId={currentUser?.id}
-        />
-      )}
-
-      {/* Claim Toast */}
-      {claimToast && (
-        <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
-          <div className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2">
-            <span className="text-xl">🏠</span>
-            <span className="font-semibold">{claimToast}</span>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

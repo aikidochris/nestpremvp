@@ -1482,46 +1482,62 @@ export type Database = {
         Returns: boolean
       }
       geomfromewkt: { Args: { "": string }; Returns: unknown }
-      get_activity_feed: {
-        Args: {
-          p_lat?: number
-          p_lon?: number
-          p_radius_meters?: number
-          p_user_id: string
-        }
-        Returns: {
-          created_at: string
-          event_id: string
-          house_number: string
-          lat: number
-          lon: number
-          market_image_url: string
-          property_id: string
-          street: string
-          summary_text: string
-          type: string
-        }[]
-      }
+      get_activity_feed:
+        | { Args: { p_user_id: string }; Returns: Json[] }
+        | {
+            Args: {
+              p_lat?: number
+              p_lon?: number
+              p_radius_meters?: number
+              p_user_id: string
+            }
+            Returns: {
+              created_at: string
+              event_id: string
+              house_number: string
+              lat: number
+              lon: number
+              market_image_url: string
+              property_id: string
+              street: string
+              summary_text: string
+              type: string
+            }[]
+          }
       get_admin_export_data: { Args: { export_type: string }; Returns: Json }
       get_admin_stats: { Args: never; Returns: Json }
       get_endorsement_count: {
         Args: { target_property_id: string }
         Returns: number
       }
-      get_heatmap_points: {
-        Args: {
-          east: number
-          mode?: string
-          north: number
-          south: number
-          west: number
-        }
-        Returns: {
-          intensity: number
-          lat: number
-          lon: number
-        }[]
-      }
+      get_heatmap_points:
+        | {
+            Args: {
+              max_lat: number
+              max_lon: number
+              min_lat: number
+              min_lon: number
+            }
+            Returns: {
+              intensity: number
+              lat: number
+              lon: number
+            }[]
+          }
+        | {
+            Args: {
+              east: number
+              mode?: string
+              north: number
+              south: number
+              west: number
+            }
+            Returns: {
+              intensity: number
+              lat: number
+              lon: number
+            }[]
+          }
       gettransactionid: { Args: never; Returns: unknown }
       longtransactionsenabled: { Args: never; Returns: boolean }
       populate_geometry_columns:

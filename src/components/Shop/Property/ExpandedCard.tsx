@@ -42,6 +42,16 @@ export default function ExpandedCard({ property, onClose, onBack, onClaim, onSel
         onUpdate?.(updated)
     }
 
+    const handleIntentChangeInternal = (intent: 'settled' | 'open' | 'selling' | 'renting') => {
+        const updates: Partial<MapProperty> = {
+            is_open_to_talking: intent === 'open',
+            is_for_sale: intent === 'selling',
+            is_for_rent: intent === 'renting',
+        }
+        handlePropertyUpdate(updates)
+        onIntentChange?.(intent)
+    }
+
     // Owner Mode: Show Dashboard OR Standard View with Edit Trigger
     if (mode === 'owner' && currentUser && isEditing) {
         return (
@@ -49,7 +59,7 @@ export default function ExpandedCard({ property, onClose, onBack, onClaim, onSel
                 property={localProperty}
                 currentUser={currentUser}
                 onClose={() => setIsEditing(false)}
-                onIntentChange={onIntentChange}
+                onIntentChange={handleIntentChangeInternal}
                 onUpdate={handlePropertyUpdate}
             />
         )

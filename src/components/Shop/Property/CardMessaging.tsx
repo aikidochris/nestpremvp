@@ -20,6 +20,7 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
     // Owner Inbox State
     const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
     const [inboxThreads, setInboxThreads] = useState<any[]>([])
+    const [inboxNotes, setInboxNotes] = useState<any[]>([])
     const [loadingInbox, setLoadingInbox] = useState(false)
 
     // Derived Messaging Hook props
@@ -45,51 +46,56 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    // Fetch Owner Threads (Inbox List) with last message preview
+    // Fetch Owner Threads (Inbox List) with last message preview AND Unclaimed Notes
     useEffect(() => {
         if (isOwner && isExpanded && !selectedThreadId) {
             setLoadingInbox(true)
             const supabase = getSupabaseClient()
 
-            // Fetch threads with nested last message
-            supabase
-                .from('message_threads')
-                .select(`
-                    *,
-                    messages (
-                        content,
-                        created_at,
-                        sender_id
-                    )
-                `)
-                .eq('property_id', propertyId)
-                .order('last_message_at', { ascending: false })
-                .then(({ data, error }) => {
-                    if (error) {
-                        console.error('[CardMessaging] Failed to fetch inbox:', error)
-                        setLoadingInbox(false)
-                        return
-                    }
-
-                    // Process to extract last message
-                    const threadsWithPreview = (data || []).map((thread: any) => {
-                        const messages = (thread.messages || []) as Array<{ content: string, created_at: string, sender_id: string }>
-                        // Sort messages by created_at desc to get latest
-                        const sortedMsgs = [...messages].sort((a, b) =>
-                            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            Promise.all([
+                // 1. Fetch Threads
+                supabase
+                    .from('message_threads')
+                    .select(`
+                        *,
+                        messages (
+                            content,
+                            created_at,
+                            sender_id
                         )
-                        const lastMsg = sortedMsgs[0]
+                    `)
+                    .eq('property_id', propertyId)
+                    .order('last_message_at', { ascending: false }),
 
-                        return {
-                            ...thread,
-                            last_message: lastMsg?.content || null,
-                            messages: undefined // Remove large array
-                        }
-                    })
+                // 2. Fetch Unclaimed Notes
+                supabase
+                    .from('unclaimed_notes')
+                    .select('*')
+                    .eq('property_id', propertyId)
+                    .eq('is_revealed', false)
+                    .order('created_at', { ascending: false })
+            ]).then(([threadsRes, notesRes]) => {
+                if (threadsRes.error) console.error('[CardMessaging] Failed to fetch inbox:', threadsRes.error)
+                if (notesRes.error) console.error('[CardMessaging] Failed to fetch notes:', notesRes.error)
 
-                    setInboxThreads(threadsWithPreview)
-                    setLoadingInbox(false)
+                // Process Threads
+                const threadsWithPreview = (threadsRes.data || []).map((thread: any) => {
+                    const messages = (thread.messages || []) as Array<{ content: string, created_at: string, sender_id: string }>
+                    const sortedMsgs = [...messages].sort((a, b) =>
+                        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                    )
+                    const lastMsg = sortedMsgs[0]
+                    return {
+                        ...thread,
+                        last_message: lastMsg?.content || null,
+                        messages: undefined
+                    }
                 })
+
+                setInboxThreads(threadsWithPreview)
+                setInboxNotes(notesRes.data || [])
+                setLoadingInbox(false)
+            })
         }
     }, [isOwner, isExpanded, selectedThreadId, propertyId])
 
@@ -201,8 +207,8 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
             .insert({
                 thread_id: newThread.id,
                 sender_id: currentUserId,
+                receiver_id: note.sender_user_id, // Note sender is the receiver of the reply
                 content: 'Thanks for your note! I saw your message and wanted to connect.',
-                status: 'sent'
             })
 
         if (msgError) {
@@ -311,6 +317,7 @@ export default function CardMessaging({ propertyId, ownerId, currentUserId, isSe
                         last_message_at: t.last_message_at,
                         unread_count: t.unread_count
                     }))}
+                    notes={inboxNotes}
                     isLoading={loadingInbox}
                     onSelectThread={setSelectedThreadId}
                 />

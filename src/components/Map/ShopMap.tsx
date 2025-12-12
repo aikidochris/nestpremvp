@@ -593,7 +593,7 @@ export default function ShopMap({
       })
       return (
         <Marker
-          key={`cluster-${cluster.id}`}
+          key={`cluster-${cluster.id}-${count}-${color}`}
           position={[lat, lon]}
           icon={createClusterIcon(count, color)}
           zIndexOffset={1000} // Ensure clusters are always on top
@@ -614,10 +614,25 @@ export default function ShopMap({
     const address = displayProperty.postcode || displayProperty.street || 'No postcode'
     const { icon, zIndexOffset } = getShopIcon(displayProperty)
     const isDraggable = draggablePropertyId === displayProperty.id
+    const effectiveForSale = displayProperty.is_for_sale ?? displayProperty.signals?.is_for_sale ?? false
+    const effectiveForRent = displayProperty.is_for_rent ?? displayProperty.signals?.is_for_rent ?? false
+    const effectiveOpen = displayProperty.is_open_to_talking ?? displayProperty.signals?.soft_listing ?? false
+    const effectiveClaimed = !!displayProperty.is_claimed
+    const effectiveOwner = !!currentUserId && displayProperty.claimed_by_user_id === currentUserId
+    const markerVariant = effectiveForSale
+      ? 'sale'
+      : effectiveForRent
+        ? 'rent'
+        : effectiveOpen
+          ? 'open'
+          : effectiveClaimed
+            ? 'claimed'
+            : 'unclaimed'
+    const markerKey = `${displayProperty.id}-${markerVariant}-${effectiveOwner ? 'owner' : 'visitor'}`
 
     return (
       <Marker
-        key={displayProperty.id}
+        key={markerKey}
         position={[displayProperty.lat, displayProperty.lon]}
         icon={icon}
         zIndexOffset={zIndexOffset}
@@ -651,10 +666,25 @@ export default function ShopMap({
       const { icon, zIndexOffset } = getShopIcon(displayProperty)
       const position = spiderfyPositions.get(displayProperty.id) ?? [displayProperty.lat, displayProperty.lon]
       const isDraggable = draggablePropertyId === displayProperty.id
+      const effectiveForSale = displayProperty.is_for_sale ?? displayProperty.signals?.is_for_sale ?? false
+      const effectiveForRent = displayProperty.is_for_rent ?? displayProperty.signals?.is_for_rent ?? false
+      const effectiveOpen = displayProperty.is_open_to_talking ?? displayProperty.signals?.soft_listing ?? false
+      const effectiveClaimed = !!displayProperty.is_claimed
+      const effectiveOwner = !!currentUserId && displayProperty.claimed_by_user_id === currentUserId
+      const markerVariant = effectiveForSale
+        ? 'sale'
+        : effectiveForRent
+          ? 'rent'
+          : effectiveOpen
+            ? 'open'
+            : effectiveClaimed
+              ? 'claimed'
+              : 'unclaimed'
+      const markerKey = `${displayProperty.id}-${markerVariant}-${effectiveOwner ? 'owner' : 'visitor'}`
 
       return (
         <Marker
-          key={displayProperty.id}
+          key={markerKey}
           position={position as [number, number]}
           icon={icon}
           zIndexOffset={zIndexOffset}

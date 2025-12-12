@@ -142,8 +142,8 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
             .insert({
                 thread_id: newThread.id,
                 sender_id: currentUserId,
-                content: content,
-                status: 'sent'
+                receiver_id: ownerId,
+                content: content
             })
             .select()
             .single()
@@ -172,6 +172,13 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
             return
         }
 
+        // Calculate receiver (the OTHER participant)
+        const receiverId = thread.participants.find(p => p !== currentUserId)
+        if (!receiverId) {
+            console.error('[sendMessage] Cannot determine receiver from participants:', thread.participants)
+            return
+        }
+
         setIsSending(true)
 
         const { data: newMessage, error } = await supabase
@@ -179,8 +186,9 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
             .insert({
                 thread_id: thread.id,
                 sender_id: currentUserId,
-                content: content,
-                status: 'sent'
+                receiver_id: receiverId,
+                content: content
+                // status field removed (doesn't exist in schema)
             })
             .select()
             .single()
@@ -189,7 +197,11 @@ export function useMessaging(propertyId: string, currentUserId?: string, specifi
             console.error('[sendMessage] Failed to insert message:', error)
         } else if (newMessage) {
             console.log('[sendMessage] Message saved successfully:', newMessage.id)
-            setMessages(prev => [...prev, newMessage])
+            setMessages(prev => {
+                // Prevent duplicate messages if realtime subscription picked it up already
+                if (prev.some(m => m.id === newMessage.id)) return prev
+                return [...prev, newMessage]
+            })
         }
         setIsSending(false)
     }
